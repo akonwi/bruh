@@ -260,6 +260,19 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// Browser Rendering (CDP) configuration
+if (process.env.WORKER_URL && process.env.CDP_SECRET) {
+    const workerUrl = process.env.WORKER_URL.replace(/\/+$/, '');
+    const cdpSecret = process.env.CDP_SECRET;
+    const cdpUrl = workerUrl.replace(/^https?:\/\//, 'wss://') + '/cdp?secret=' + encodeURIComponent(cdpSecret);
+    config.browser = config.browser || {};
+    config.browser.profiles = config.browser.profiles || {};
+    config.browser.profiles.cloudflare = {
+        cdpUrl: cdpUrl,
+    };
+    console.log('Browser Rendering configured: cdpUrl=' + cdpUrl.replace(cdpSecret, '***'));
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
