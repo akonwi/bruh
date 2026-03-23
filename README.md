@@ -6,6 +6,9 @@ Build a personal AI agent platform around **Pi** that runs in a **Cloudflare san
 
 This replaces the earlier MoltWorker/OpenClaw experiment. The new direction is to use **Pi natively** via its **SDK**, keep the edge layer thin, and build only the pieces we actually want.
 
+- Detailed planning doc: [docs/README.md](./docs/README.md)
+- Progress tracker: [docs/TODO.md](./docs/TODO.md)
+
 ## Product shape
 
 - **Personal**, single-user system

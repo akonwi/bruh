@@ -1,0 +1,19 @@
+{
+  "name": "@bruh/edge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.10.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260312.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.72.0"
+  }
+}

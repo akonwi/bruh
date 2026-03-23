@@ -26,27 +26,27 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 1. Root workspace setup
 
-- [ ] Create root `package.json` workspace covering `edge`, `runtime`, and `web`
-- [ ] Add shared root scripts for install/dev/build/typecheck
-- [ ] Add root `.gitignore` cleanup for new apps
-- [ ] Add root README links to `docs/README.md` and this TODO
+- [x] Create root `package.json` workspace covering `edge`, `runtime`, and `web`
+- [x] Add shared root scripts for install/dev/build/typecheck
+- [x] Add root `.gitignore` cleanup for new apps
+- [x] Add root README links to `docs/README.md` and this TODO
 
 ---
 
 ## 2. Web app scaffold (`web/`)
 
-- [ ] Create `web/` app with Vite + React + TypeScript
-- [ ] Bootstrap shadcn with:
+- [x] Create `web/` app with Vite + React + TypeScript
+- [x] Bootstrap shadcn with:
   - `bunx shadcn create --preset buFzo92`
-- [ ] Add Base UI
-- [ ] Add Tailwind v4 setup
-- [ ] Port/adapt theme conventions from `../stone/...`
+- [x] Add Base UI
+- [x] Add Tailwind v4 setup
+- [~] Port/adapt theme conventions from `../stone/...`
   - [ ] colors/tokens
-  - [ ] typography
+  - [x] typography
   - [ ] radius/border conventions
   - [ ] dark mode provider
-  - [ ] `cn()` utility
-- [ ] Create app shell
+  - [x] `cn()` utility
+- [x] Create app shell
 - [ ] Create chat page skeleton
 - [ ] Create empty session list UI
 - [ ] Add transport layer for session HTTP + SSE
@@ -56,13 +56,13 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 3. Edge scaffold (`edge/`)
 
-- [ ] Create Cloudflare Worker app
-- [ ] Add Wrangler config
+- [x] Create Cloudflare Worker app
+- [x] Add Wrangler config
 - [ ] Add bindings:
   - [ ] Durable Objects
   - [ ] R2 bucket
 - [ ] Add auth middleware placeholder for single-user access
-- [ ] Add health endpoint
+- [x] Add health endpoint
 - [ ] Add internal runtime auth mechanism (shared secret)
 
 ---
@@ -88,10 +88,10 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 5. Runtime scaffold (`runtime/`)
 
-- [ ] Create Node runtime app
+- [x] Create Node runtime app
 - [ ] Add Dockerfile suitable for Cloudflare sandbox/container
-- [ ] Add Hono/Fastify server
-- [ ] Add health endpoint
+- [x] Add Hono/Fastify server
+- [x] Add health endpoint
 - [ ] Add internal endpoints for edge-to-runtime calls
 - [ ] Add runtime config loader
 - [ ] Decide runtime filesystem layout
@@ -107,10 +107,10 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 - [ ] Build Pi session factory around `createAgentSession()`
 - [ ] Configure runtime API keys with `AuthStorage.setRuntimeApiKey(...)`
 - [ ] Add `DefaultResourceLoader`
-- [ ] Add project-local `.pi/` layout in `runtime/`
-  - [ ] `.pi/extensions/`
-  - [ ] `.pi/skills/`
-  - [ ] `.pi/AGENTS.md`
+- [x] Add project-local `.pi/` layout in `runtime/`
+  - [x] `.pi/extensions/`
+  - [x] `.pi/skills/`
+  - [x] `.pi/AGENTS.md`
 - [ ] Start with restricted/baseline tool set
 - [ ] Subscribe to Pi session events and normalize them for edge streaming
 - [ ] Support runtime commands:
