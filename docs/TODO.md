@@ -18,8 +18,8 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - `runtime/`
   - `web/`
 - [x] Write north-star architecture doc in `docs/README.md`
-- [ ] Decide what to do with legacy `server/` code
-  - options: archive, keep temporarily, or delete later
+- [x] Decide what to do with legacy `server/` code
+  - deleted the old OpenClaw/MoltWorker `server/` path
 - [x] Update root README to reflect the new direction
 
 ---
@@ -47,10 +47,10 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - [ ] dark mode provider
   - [x] `cn()` utility
 - [x] Create app shell
-- [ ] Create chat page skeleton
+- [x] Create chat page skeleton
 - [ ] Create empty session list UI
-- [ ] Add transport layer for session HTTP + SSE
-- [ ] Add reconnect/resume behavior for SSE stream
+- [x] Add transport layer for session HTTP + SSE
+- [x] Add reconnect/resume behavior for SSE stream
 
 ---
 
@@ -58,8 +58,8 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 - [x] Create Cloudflare Worker app
 - [x] Add Wrangler config
-- [ ] Add bindings:
-  - [ ] Durable Objects
+- [~] Add bindings:
+  - [x] Durable Objects
   - [ ] R2 bucket
 - [ ] Add auth middleware placeholder for single-user access
 - [x] Add health endpoint
@@ -69,16 +69,16 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 4. Session Durable Objects
 
-- [ ] Create `SessionDO`
-- [ ] Define session metadata model
-- [ ] Define outbound event envelope with `sessionId` + `seq`
-- [ ] Add event buffering/replay in `SessionDO`
-- [ ] Add SSE stream endpoint: `GET /sessions/:id/stream`
-- [ ] Add command intake endpoints routed through DO:
-  - [ ] `POST /sessions`
+- [x] Create `SessionDO`
+- [x] Define session metadata model
+- [x] Define outbound event envelope with `sessionId` + `seq`
+- [x] Add event buffering/replay in `SessionDO`
+- [x] Add SSE stream endpoint: `GET /sessions/:id/stream`
+- [~] Add command intake endpoints routed through DO:
+  - [x] `POST /sessions`
   - [ ] `GET /sessions`
-  - [ ] `GET /sessions/:id`
-  - [ ] `POST /sessions/:id/prompt`
+  - [x] `GET /sessions/:id`
+  - [x] `POST /sessions/:id/prompt`
   - [ ] `POST /sessions/:id/steer`
   - [ ] `POST /sessions/:id/follow-up`
   - [ ] `POST /sessions/:id/abort`

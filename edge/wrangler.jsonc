@@ -5,5 +5,19 @@
   "compatibility_date": "2026-03-23",
   "observability": {
     "enabled": true
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION_DO",
+        "class_name": "SessionDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SessionDO"]
+    }
+  ]
 }
