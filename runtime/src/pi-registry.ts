@@ -50,6 +50,43 @@ function extractAssistantTextFromMessages(messages: unknown[]): string {
   return '';
 }
 
+function summarizeAssistantMessage(message: unknown): Record<string, unknown> {
+  const candidate = message as {
+    role?: string;
+    stopReason?: string;
+    errorMessage?: string;
+    content?: Array<Record<string, unknown>> | string;
+  };
+
+  if (candidate?.role !== 'assistant') {
+    return {};
+  }
+
+  if (typeof candidate.content === 'string') {
+    return {
+      stopReason: candidate.stopReason,
+      errorMessage: candidate.errorMessage,
+      contentType: 'string',
+      textLength: candidate.content.length,
+      preview: candidate.content.slice(0, 400),
+    };
+  }
+
+  const content = Array.isArray(candidate.content) ? candidate.content : [];
+  return {
+    stopReason: candidate.stopReason,
+    errorMessage: candidate.errorMessage,
+    contentType: 'array',
+    contentSummary: content.map((part) => ({
+      type: typeof part.type === 'string' ? part.type : 'unknown',
+      keys: Object.keys(part),
+      textLength: typeof part.text === 'string' ? part.text.length : undefined,
+      thinkingLength: typeof part.thinking === 'string' ? part.thinking.length : undefined,
+      name: typeof part.name === 'string' ? part.name : undefined,
+    })),
+  };
+}
+
 interface ManagedSession {
   session: AgentSession;
   queue: Promise<void>;
@@ -171,6 +208,10 @@ export class PiSessionRegistry {
       case 'agent_end': {
         const messages = Array.isArray(event.messages) ? event.messages : [];
         const finalText = extractAssistantTextFromMessages(messages);
+        const assistantMessage = [...messages].reverse().find((message) => {
+          const candidate = message as { role?: string };
+          return candidate.role === 'assistant';
+        });
 
         await this.publish(sessionId, {
           type: 'runtime.debug.agent_end',
@@ -181,6 +222,7 @@ export class PiSessionRegistry {
               return candidate.role ?? 'unknown';
             }),
             hasFinalText: Boolean(finalText),
+            assistant: summarizeAssistantMessage(assistantMessage),
           },
         });
 
