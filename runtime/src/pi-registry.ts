@@ -316,6 +316,7 @@ export class PiSessionRegistry {
         await this.publish(sessionId, {
           type: 'tool.execution.start',
           payload: {
+            toolCallId: event.toolCallId,
             toolName: event.toolName,
             args: event.args,
           },
@@ -325,6 +326,7 @@ export class PiSessionRegistry {
         await this.publish(sessionId, {
           type: 'tool.execution.end',
           payload: {
+            toolCallId: event.toolCallId,
             toolName: event.toolName,
             isError: event.isError,
           },

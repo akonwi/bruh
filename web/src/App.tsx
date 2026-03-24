@@ -1,10 +1,14 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowSquareOut,
+  CaretRight,
+  CheckCircle,
   ClockCounterClockwise,
   Plus,
   SpinnerGap,
   StopCircle,
+  WarningCircle,
+  Wrench,
 } from '@phosphor-icons/react'
 
 import { AppSidebar } from '@/components/app-sidebar'
@@ -36,18 +40,32 @@ const ASSISTANT_COMPLETE_EVENT_TYPES = new Set([
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 type ChatMessageRole = 'user' | 'assistant' | 'system'
 type ChatMessageStatus = 'complete' | 'streaming' | 'aborted' | 'error'
+type ToolActivityStatus = 'running' | 'success' | 'error'
 type AppRoute =
   | { kind: 'main' }
   | { kind: 'threads' }
   | { kind: 'thread'; sessionId: string }
 
 interface ChatMessage {
+  kind: 'message'
   id: string
   role: ChatMessageRole
   status: ChatMessageStatus
   text: string
   timestamp: string
 }
+
+interface ToolActivityItem {
+  kind: 'tool'
+  id: string
+  toolCallId?: string
+  toolName: string
+  status: ToolActivityStatus
+  timestamp: string
+  args?: Record<string, unknown>
+}
+
+type TranscriptItem = ChatMessage | ToolActivityItem
 
 function parseRoute(pathname: string): AppRoute {
   if (pathname === '/' || pathname === '') {
@@ -162,25 +180,90 @@ function getSessionTitleFromEvent(event: SessionEventEnvelope): string | undefin
   return text ? createChatTitle(text) : undefined
 }
 
-function getThreadTitle(session: SessionState | null, messages: ChatMessage[]): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatToolName(toolName: string): string {
+  return toolName.replaceAll('_', ' ')
+}
+
+function truncateInline(value: string, maxLength = 72): string {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength).trimEnd()}…`
+}
+
+function summarizeToolActivity(toolName: string, args?: Record<string, unknown>): string {
+  const label = formatToolName(toolName)
+  const candidate =
+    (typeof args?.path === 'string' && args.path) ||
+    (typeof args?.prefix === 'string' && args.prefix) ||
+    (typeof args?.command === 'string' && args.command) ||
+    (typeof args?.url === 'string' && args.url) ||
+    (typeof args?.pattern === 'string' && args.pattern) ||
+    (typeof args?.name === 'string' && args.name) ||
+    undefined
+
+  if (!candidate) {
+    return label
+  }
+
+  return `${label} · ${truncateInline(candidate)}`
+}
+
+function formatToolArgs(args?: Record<string, unknown>): string | null {
+  if (!args || Object.keys(args).length === 0) {
+    return null
+  }
+
+  return JSON.stringify(args, null, 2)
+}
+
+function getThreadTitle(session: SessionState | null, transcript: TranscriptItem[]): string {
   if (session?.title?.trim()) return session.title
-  const firstUserMessage = messages.find((message) => message.role === 'user')
+  const firstUserMessage = transcript.find(
+    (item): item is ChatMessage => item.kind === 'message' && item.role === 'user',
+  )
   if (firstUserMessage) return createChatTitle(firstUserMessage.text)
   return 'Untitled thread'
 }
 
-function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
-  const messages: ChatMessage[] = []
+function buildTranscript(events: SessionEventEnvelope[]): TranscriptItem[] {
+  const items: TranscriptItem[] = []
+  const toolItems = new Map<string, ToolActivityItem>()
   let currentAssistant: ChatMessage | null = null
+
+  const findLatestStreamingAssistant = (): ChatMessage | null => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i]
+      if (item.kind === 'message' && item.role === 'assistant' && item.status === 'streaming') {
+        return item
+      }
+    }
+
+    return null
+  }
+
+  const findLatestRunningTool = (toolName: string): ToolActivityItem | null => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i]
+      if (item.kind === 'tool' && item.toolName === toolName && item.status === 'running') {
+        return item
+      }
+    }
+
+    return null
+  }
 
   for (const event of events) {
     if (USER_EVENT_TYPES.has(event.type)) {
       const text = getEventPromptText(event)
       if (!text) continue
 
-      const lastMessage = messages[messages.length - 1]
-      if (!(lastMessage?.role === 'user' && lastMessage.text === text)) {
-        messages.push({
+      const lastItem = items[items.length - 1]
+      if (!(lastItem?.kind === 'message' && lastItem.role === 'user' && lastItem.text === text)) {
+        items.push({
+          kind: 'message',
           id: `user-${event.seq}`,
           role: 'user',
           status: 'complete',
@@ -199,13 +282,14 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
 
       if (!currentAssistant || currentAssistant.status !== 'streaming') {
         currentAssistant = {
+          kind: 'message',
           id: `assistant-${event.seq}`,
           role: 'assistant',
           status: 'streaming',
           text: '',
           timestamp: event.timestamp,
         }
-        messages.push(currentAssistant)
+        items.push(currentAssistant)
       }
 
       currentAssistant.text += delta
@@ -217,23 +301,29 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
       const text = getEventPromptText(event)
       if (!text) continue
 
-      if (currentAssistant && currentAssistant.status === 'streaming') {
-        currentAssistant.text = text
-        currentAssistant.status = 'complete'
-        currentAssistant.timestamp = event.timestamp
+      const targetAssistant =
+        currentAssistant && currentAssistant.status === 'streaming'
+          ? currentAssistant
+          : findLatestStreamingAssistant()
+
+      if (targetAssistant) {
+        targetAssistant.text = text
+        targetAssistant.status = 'complete'
+        targetAssistant.timestamp = event.timestamp
         currentAssistant = null
         continue
       }
 
-      const lastMessage = messages[messages.length - 1]
-      if (lastMessage?.role === 'assistant' && lastMessage.text === text) {
-        lastMessage.status = 'complete'
-        lastMessage.timestamp = event.timestamp
+      const lastItem = items[items.length - 1]
+      if (lastItem?.kind === 'message' && lastItem.role === 'assistant' && lastItem.text === text) {
+        lastItem.status = 'complete'
+        lastItem.timestamp = event.timestamp
         currentAssistant = null
         continue
       }
 
-      messages.push({
+      items.push({
+        kind: 'message',
         id: `assistant-${event.seq}`,
         role: 'assistant',
         status: 'complete',
@@ -244,12 +334,70 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
       continue
     }
 
-    if (event.type === 'runtime.prompt.aborted') {
-      if (currentAssistant && currentAssistant.text) {
-        currentAssistant.status = 'aborted'
-        currentAssistant.timestamp = event.timestamp
+    if (event.type === 'tool.execution.start') {
+      const toolName = typeof event.payload.toolName === 'string' ? event.payload.toolName : 'tool'
+      const toolCallId = typeof event.payload.toolCallId === 'string' ? event.payload.toolCallId : undefined
+      const args = isRecord(event.payload.args) ? event.payload.args : undefined
+
+      const toolItem: ToolActivityItem = {
+        kind: 'tool',
+        id: `tool-${toolCallId ?? event.seq}`,
+        toolCallId,
+        toolName,
+        status: 'running',
+        timestamp: event.timestamp,
+        args,
+      }
+
+      items.push(toolItem)
+      if (toolCallId) {
+        toolItems.set(toolCallId, toolItem)
+      }
+      currentAssistant = null
+      continue
+    }
+
+    if (event.type === 'tool.execution.end') {
+      const toolName = typeof event.payload.toolName === 'string' ? event.payload.toolName : 'tool'
+      const toolCallId = typeof event.payload.toolCallId === 'string' ? event.payload.toolCallId : undefined
+      const isError = Boolean(event.payload.isError)
+
+      const toolItem =
+        (toolCallId ? toolItems.get(toolCallId) : null) ?? findLatestRunningTool(toolName)
+
+      if (toolItem) {
+        toolItem.status = isError ? 'error' : 'success'
+        toolItem.timestamp = event.timestamp
+        if (toolCallId) {
+          toolItems.delete(toolCallId)
+        }
       } else {
-        messages.push({
+        items.push({
+          kind: 'tool',
+          id: `tool-${toolCallId ?? event.seq}`,
+          toolCallId,
+          toolName,
+          status: isError ? 'error' : 'success',
+          timestamp: event.timestamp,
+        })
+      }
+
+      currentAssistant = null
+      continue
+    }
+
+    if (event.type === 'runtime.prompt.aborted') {
+      const targetAssistant =
+        currentAssistant && currentAssistant.status === 'streaming'
+          ? currentAssistant
+          : findLatestStreamingAssistant()
+
+      if (targetAssistant && targetAssistant.text) {
+        targetAssistant.status = 'aborted'
+        targetAssistant.timestamp = event.timestamp
+      } else {
+        items.push({
+          kind: 'message',
           id: `system-${event.seq}`,
           role: 'system',
           status: 'aborted',
@@ -270,7 +418,8 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
             ? event.payload.details
             : 'Something went wrong while running the session.'
 
-      messages.push({
+      items.push({
+        kind: 'message',
         id: `system-${event.seq}`,
         role: 'system',
         status: 'error',
@@ -281,7 +430,7 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
     }
   }
 
-  return messages.filter((message) => message.text.trim().length > 0)
+  return items.filter((item) => item.kind === 'tool' || item.text.trim().length > 0)
 }
 
 function App() {
@@ -650,11 +799,17 @@ function App() {
 
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const isSessionActive = session?.status === 'active'
-  const lastTranscriptMessage = transcript[transcript.length - 1]
+  const lastTranscriptItem = transcript[transcript.length - 1]
+  const hasRunningTool = transcript.some((item) => item.kind === 'tool' && item.status === 'running')
   const showThinking =
     Boolean(session) &&
     isSessionActive &&
-    !(lastTranscriptMessage?.role === 'assistant' && lastTranscriptMessage.status === 'streaming')
+    !hasRunningTool &&
+    !(
+      lastTranscriptItem?.kind === 'message' &&
+      lastTranscriptItem.role === 'assistant' &&
+      lastTranscriptItem.status === 'streaming'
+    )
 
   const isShowingConversation = route.kind === 'main' || route.kind === 'thread'
   const currentThreadId = route.kind === 'thread' ? route.sessionId : null
@@ -726,38 +881,100 @@ function App() {
                     </p>
                   </div>
                 ) : (
-                  transcript.map((message) => {
-                    if (message.role === 'system') {
+                  transcript.map((item) => {
+                    if (item.kind === 'tool') {
+                      const panelTone =
+                        item.status === 'running'
+                          ? 'border-amber-500/30 bg-amber-500/5'
+                          : item.status === 'error'
+                            ? 'border-destructive/30 bg-destructive/5'
+                            : 'border-emerald-500/30 bg-emerald-500/5'
+                      const iconTone =
+                        item.status === 'running'
+                          ? 'text-amber-600 dark:text-amber-300'
+                          : item.status === 'error'
+                            ? 'text-destructive'
+                            : 'text-emerald-600 dark:text-emerald-300'
+                      const statusLabel =
+                        item.status === 'running'
+                          ? 'Running'
+                          : item.status === 'error'
+                            ? 'Failed'
+                            : 'Completed'
+                      const argsText = formatToolArgs(item.args)
+
+                      return (
+                        <div key={item.id} className='flex justify-start'>
+                          <details className={cn('group w-full max-w-[88%] border shadow-sm sm:max-w-[78%]', panelTone)}>
+                            <summary className='flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden'>
+                              <div className='min-w-0 flex items-center gap-2'>
+                                {item.status === 'running' ? (
+                                  <SpinnerGap className={cn('size-4 shrink-0 animate-spin', iconTone)} />
+                                ) : item.status === 'error' ? (
+                                  <WarningCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
+                                ) : (
+                                  <CheckCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
+                                )}
+                                <div className='min-w-0'>
+                                  <p className='truncate text-sm font-medium text-foreground'>
+                                    {summarizeToolActivity(item.toolName, item.args)}
+                                  </p>
+                                  <p className={cn('mt-0.5 text-[11px]', iconTone)}>
+                                    {statusLabel} • {formatMessageTime(item.timestamp)}
+                                  </p>
+                                </div>
+                              </div>
+                              <CaretRight className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
+                            </summary>
+                            <div className='border-t bg-background/80 px-3 py-3 text-xs text-foreground'>
+                              <div className='mb-2 flex items-center gap-2 text-muted-foreground'>
+                                <Wrench className='size-3.5' />
+                                <span>{formatToolName(item.toolName)}</span>
+                              </div>
+                              {argsText ? (
+                                <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>
+                                  {argsText}
+                                </pre>
+                              ) : (
+                                <p className='text-muted-foreground'>No arguments</p>
+                              )}
+                            </div>
+                          </details>
+                        </div>
+                      )
+                    }
+
+                    if (item.role === 'system') {
                       const tone =
-                        message.status === 'error'
+                        item.status === 'error'
                           ? 'border-destructive/30 bg-destructive/5 text-destructive'
                           : 'border-border bg-background text-muted-foreground'
 
                       return (
-                        <div key={message.id} className='flex justify-center'>
+                        <div key={item.id} className='flex justify-center'>
                           <div className={cn('max-w-2xl border px-4 py-3 text-sm', tone)}>
-                            <p className='whitespace-pre-wrap leading-6'>{message.text}</p>
+                            <p className='whitespace-pre-wrap leading-6'>{item.text}</p>
                           </div>
                         </div>
                       )
                     }
 
-                    const isUser = message.role === 'user'
+                    const isUser = item.role === 'user'
                     const bubbleClasses = isUser
                       ? 'bg-primary text-primary-foreground'
                       : 'border bg-background text-card-foreground shadow-sm'
                     const metaLabel =
-                      message.status === 'streaming'
+                      item.status === 'streaming'
                         ? 'Thinking…'
-                        : message.status === 'aborted'
+                        : item.status === 'aborted'
                           ? 'Stopped'
-                          : formatMessageTime(message.timestamp)
+                          : formatMessageTime(item.timestamp)
 
                     return (
-                      <div key={message.id} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+                      <div key={item.id} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
                         <div className={cn('max-w-[88%] px-3 py-2 sm:max-w-[78%]', bubbleClasses)}>
                           <p className='whitespace-pre-wrap text-sm leading-6 sm:text-[15px]'>
-                            {message.text}
+                            {item.text}
                           </p>
                           <p
                             className={cn(
@@ -775,8 +992,9 @@ function App() {
 
                 {showThinking ? (
                   <div className='flex justify-start'>
-                    <div className='border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm'>
-                      Pi is thinking…
+                    <div className='inline-flex items-center gap-2 border bg-background px-3 py-2 text-sm text-muted-foreground shadow-sm'>
+                      <SpinnerGap className='size-4 animate-spin' />
+                      <span>Thinking...</span>
                     </div>
                   </div>
                 ) : null}
