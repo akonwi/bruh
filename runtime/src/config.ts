@@ -7,6 +7,7 @@ export interface RuntimeConfig {
   cwd: string;
   agentDir: string;
   anthropicApiKey: string;
+  anthropicModel: string;
 }
 
 export async function loadConfig(): Promise<RuntimeConfig> {
@@ -25,5 +26,6 @@ export async function loadConfig(): Promise<RuntimeConfig> {
     cwd,
     agentDir,
     anthropicApiKey,
+    anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-20250514',
   };
 }

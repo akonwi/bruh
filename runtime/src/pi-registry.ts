@@ -154,8 +154,18 @@ export class PiSessionRegistry {
 
     const modelRegistry = new ModelRegistry(authStorage);
     const availableModels = await modelRegistry.getAvailable();
+    const preferredModelIds = [
+      this.config.anthropicModel,
+      'claude-sonnet-4-20250514',
+      'claude-sonnet-4-5',
+      'claude-opus-4-5',
+    ];
+
     const model =
-      availableModels.find((candidate) => candidate.provider === 'anthropic' && /sonnet/i.test(candidate.id)) ??
+      preferredModelIds
+        .map((modelId) => modelRegistry.find('anthropic', modelId))
+        .find((candidate) => candidate && availableModels.some((available) => available.id === candidate.id)) ??
+      availableModels.find((candidate) => candidate.provider === 'anthropic' && /sonnet-4|sonnet-4-5|sonnet/i.test(candidate.id)) ??
       availableModels.find((candidate) => candidate.provider === 'anthropic');
 
     if (!model) {
@@ -194,6 +204,7 @@ export class PiSessionRegistry {
       payload: {
         provider: model.provider,
         modelId: model.id,
+        requestedModelId: this.config.anthropicModel,
       },
     });
 
