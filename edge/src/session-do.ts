@@ -232,7 +232,7 @@ export class SessionDO {
   }
 
   private async forwardPromptToRuntime(sessionId: string, text: string): Promise<void> {
-    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://127.0.0.1:8788').replace(/\/+$/, '');
+    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://localhost:8788').replace(/\/+$/, '');
 
     try {
       const response = await fetch(`${runtimeBaseUrl}/internal/sessions/${sessionId}/prompt`, {

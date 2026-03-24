@@ -21,7 +21,7 @@ export async function loadConfig(): Promise<RuntimeConfig> {
 
   return {
     port: Number(process.env.PORT || 8788),
-    edgeBaseUrl: (process.env.EDGE_BASE_URL || 'http://127.0.0.1:8790').replace(/\/+$/, ''),
+    edgeBaseUrl: (process.env.EDGE_BASE_URL || 'http://localhost:8790').replace(/\/+$/, ''),
     cwd,
     agentDir,
     anthropicApiKey,
