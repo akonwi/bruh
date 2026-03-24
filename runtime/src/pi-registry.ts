@@ -50,43 +50,6 @@ function extractAssistantTextFromMessages(messages: unknown[]): string {
   return '';
 }
 
-function summarizeAssistantMessage(message: unknown): Record<string, unknown> {
-  const candidate = message as {
-    role?: string;
-    stopReason?: string;
-    errorMessage?: string;
-    content?: Array<Record<string, unknown>> | string;
-  };
-
-  if (candidate?.role !== 'assistant') {
-    return {};
-  }
-
-  if (typeof candidate.content === 'string') {
-    return {
-      stopReason: candidate.stopReason,
-      errorMessage: candidate.errorMessage,
-      contentType: 'string',
-      textLength: candidate.content.length,
-      preview: candidate.content.slice(0, 400),
-    };
-  }
-
-  const content = Array.isArray(candidate.content) ? candidate.content : [];
-  return {
-    stopReason: candidate.stopReason,
-    errorMessage: candidate.errorMessage,
-    contentType: 'array',
-    contentSummary: content.map((part) => ({
-      type: typeof part.type === 'string' ? part.type : 'unknown',
-      keys: Object.keys(part),
-      textLength: typeof part.text === 'string' ? part.text.length : undefined,
-      thinkingLength: typeof part.thinking === 'string' ? part.thinking.length : undefined,
-      name: typeof part.name === 'string' ? part.name : undefined,
-    })),
-  };
-}
-
 interface ManagedSession {
   session: AgentSession;
   queue: Promise<void>;
@@ -156,16 +119,17 @@ export class PiSessionRegistry {
     const availableModels = await modelRegistry.getAvailable();
     const preferredModelIds = [
       this.config.anthropicModel,
+      'claude-opus-4-6',
+      'claude-opus-4-5',
       'claude-sonnet-4-20250514',
       'claude-sonnet-4-5',
-      'claude-opus-4-5',
     ];
 
     const model =
       preferredModelIds
         .map((modelId) => modelRegistry.find('anthropic', modelId))
         .find((candidate) => candidate && availableModels.some((available) => available.id === candidate.id)) ??
-      availableModels.find((candidate) => candidate.provider === 'anthropic' && /sonnet-4|sonnet-4-5|sonnet/i.test(candidate.id)) ??
+      availableModels.find((candidate) => candidate.provider === 'anthropic' && /opus-4-6|opus-4-5|opus|sonnet-4|sonnet-4-5|sonnet/i.test(candidate.id)) ??
       availableModels.find((candidate) => candidate.provider === 'anthropic');
 
     if (!model) {
@@ -219,23 +183,6 @@ export class PiSessionRegistry {
       case 'agent_end': {
         const messages = Array.isArray(event.messages) ? event.messages : [];
         const finalText = extractAssistantTextFromMessages(messages);
-        const assistantMessage = [...messages].reverse().find((message) => {
-          const candidate = message as { role?: string };
-          return candidate.role === 'assistant';
-        });
-
-        await this.publish(sessionId, {
-          type: 'runtime.debug.agent_end',
-          payload: {
-            messageCount: messages.length,
-            roles: messages.map((message) => {
-              const candidate = message as { role?: string };
-              return candidate.role ?? 'unknown';
-            }),
-            hasFinalText: Boolean(finalText),
-            assistant: summarizeAssistantMessage(assistantMessage),
-          },
-        });
 
         if (finalText) {
           await this.publish(sessionId, {
