@@ -18,6 +18,30 @@ interface PublishInput {
   payload: Record<string, unknown>;
 }
 
+function extractAssistantText(message: unknown): string {
+  const candidate = message as {
+    role?: string;
+    content?: Array<{ type?: string; text?: string }> | string;
+  };
+
+  if (candidate?.role !== 'assistant') {
+    return '';
+  }
+
+  if (typeof candidate.content === 'string') {
+    return candidate.content;
+  }
+
+  if (!Array.isArray(candidate.content)) {
+    return '';
+  }
+
+  return candidate.content
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('');
+}
+
 interface ManagedSession {
   session: AgentSession;
   queue: Promise<void>;
@@ -150,6 +174,26 @@ export class PiSessionRegistry {
           await this.publish(sessionId, {
             type: 'assistant.thinking.delta',
             payload: { delta: update.delta },
+          });
+        }
+        return;
+      }
+      case 'message_end': {
+        const text = extractAssistantText(event.message);
+        if (text) {
+          await this.publish(sessionId, {
+            type: 'assistant.message.complete',
+            payload: { text },
+          });
+        }
+        return;
+      }
+      case 'turn_end': {
+        const text = extractAssistantText(event.message);
+        if (text) {
+          await this.publish(sessionId, {
+            type: 'assistant.turn.complete',
+            payload: { text },
           });
         }
         return;

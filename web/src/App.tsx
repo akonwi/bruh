@@ -133,14 +133,23 @@ function App() {
     }
   }, [streamStatus])
 
-  const assistantText = useMemo(
-    () =>
-      events
-        .filter((event) => event.type === 'assistant.text.delta')
-        .map((event) => String(event.payload.delta ?? ''))
-        .join(''),
-    [events],
-  )
+  const assistantText = useMemo(() => {
+    const deltaText = events
+      .filter((event) => event.type === 'assistant.text.delta')
+      .map((event) => String(event.payload.delta ?? ''))
+      .join('')
+
+    if (deltaText) return deltaText
+
+    const finalTextEvent = [...events]
+      .reverse()
+      .find(
+        (event) =>
+          event.type === 'assistant.message.complete' || event.type === 'assistant.turn.complete',
+      )
+
+    return finalTextEvent ? String(finalTextEvent.payload.text ?? '') : ''
+  }, [events])
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -212,7 +221,8 @@ function App() {
             <div className="border-b pb-4">
               <h2 className="text-lg font-medium">Assistant output</h2>
               <p className="text-sm text-muted-foreground">
-                Streaming text assembled from `assistant.text.delta` events.
+                Streaming text assembled from delta events, with a fallback to completed assistant
+                messages if deltas are sparse.
               </p>
             </div>
             <div className="min-h-40 border bg-background p-4 text-sm leading-7 whitespace-pre-wrap">
