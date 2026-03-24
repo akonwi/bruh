@@ -145,7 +145,9 @@ function App() {
       .reverse()
       .find(
         (event) =>
-          event.type === 'assistant.message.complete' || event.type === 'assistant.turn.complete',
+          event.type === 'assistant.message.complete' ||
+          event.type === 'assistant.turn.complete' ||
+          event.type === 'assistant.agent.complete',
       )
 
     return finalTextEvent ? String(finalTextEvent.payload.text ?? '') : ''
@@ -249,7 +251,7 @@ function App() {
                           </p>
                           <span className="text-xs text-muted-foreground">seq {event.seq}</span>
                         </div>
-                        <pre className="overflow-x-auto text-xs leading-6 text-foreground">
+                        <pre className="overflow-x-auto text-xs leading-6 text-foreground whitespace-pre-wrap break-words">
                           {JSON.stringify(event.payload, null, 2)}
                         </pre>
                       </div>

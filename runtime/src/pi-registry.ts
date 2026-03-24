@@ -42,6 +42,14 @@ function extractAssistantText(message: unknown): string {
     .join('');
 }
 
+function extractAssistantTextFromMessages(messages: unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = extractAssistantText(messages[i]);
+    if (text) return text;
+  }
+  return '';
+}
+
 interface ManagedSession {
   session: AgentSession;
   queue: Promise<void>;
@@ -160,9 +168,32 @@ export class PiSessionRegistry {
       case 'agent_start':
         await this.publish(sessionId, { type: 'agent.start', payload: {} });
         return;
-      case 'agent_end':
+      case 'agent_end': {
+        const messages = Array.isArray(event.messages) ? event.messages : [];
+        const finalText = extractAssistantTextFromMessages(messages);
+
+        await this.publish(sessionId, {
+          type: 'runtime.debug.agent_end',
+          payload: {
+            messageCount: messages.length,
+            roles: messages.map((message) => {
+              const candidate = message as { role?: string };
+              return candidate.role ?? 'unknown';
+            }),
+            hasFinalText: Boolean(finalText),
+          },
+        });
+
+        if (finalText) {
+          await this.publish(sessionId, {
+            type: 'assistant.agent.complete',
+            payload: { text: finalText },
+          });
+        }
+
         await this.publish(sessionId, { type: 'agent.end', payload: {} });
         return;
+      }
       case 'message_update': {
         const update = event.assistantMessageEvent;
         if (update.type === 'text_delta') {
