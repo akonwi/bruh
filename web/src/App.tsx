@@ -850,7 +850,7 @@ function App() {
       return 'Bruh is responding…'
     }
 
-    return 'Press Enter to send. Shift+Enter for a new line.'
+    return null
   }, [isLoadingConversation, isSessionActive, session])
 
   const isShowingConversation = route.kind === 'main' || route.kind === 'thread'
@@ -937,12 +937,6 @@ function App() {
                           : item.status === 'error'
                             ? 'text-destructive'
                             : 'text-emerald-600 dark:text-emerald-300'
-                      const statusLabel =
-                        item.status === 'running'
-                          ? 'Running'
-                          : item.status === 'error'
-                            ? 'Failed'
-                            : 'Completed'
                       const argsText = formatToolArgs(item.args)
 
                       return (
@@ -961,9 +955,6 @@ function App() {
                                   <p className='truncate text-sm font-medium text-foreground'>
                                     {summarizeToolActivity(item.toolName, item.args)}
                                   </p>
-                                  <p className={cn('mt-0.5 text-[11px]', iconTone)}>
-                                    {statusLabel} • {formatMessageTime(item.timestamp)}
-                                  </p>
                                 </div>
                               </div>
                               <CaretRight className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
@@ -972,6 +963,8 @@ function App() {
                               <div className='mb-2 flex items-center gap-2 text-muted-foreground'>
                                 <Wrench className='size-3.5' />
                                 <span>{formatToolName(item.toolName)}</span>
+                                <span>•</span>
+                                <span>{formatMessageTime(item.timestamp)}</span>
                               </div>
                               {argsText ? (
                                 <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>
@@ -1064,7 +1057,7 @@ function App() {
                   />
                   <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
                     <div className='min-w-0 text-xs text-muted-foreground'>
-                      <span>{composerHelperText}</span>
+                      {composerHelperText ? <span>{composerHelperText}</span> : null}
                     </div>
                     {isSessionActive ? (
                       <Button
