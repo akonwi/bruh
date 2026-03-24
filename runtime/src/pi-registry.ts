@@ -50,9 +50,37 @@ function extractAssistantTextFromMessages(messages: unknown[]): string {
   return '';
 }
 
+function extractAssistantStopReason(message: unknown): string | undefined {
+  const candidate = message as {
+    role?: string;
+    stopReason?: string;
+  };
+
+  if (candidate?.role !== 'assistant' || typeof candidate.stopReason !== 'string') {
+    return undefined;
+  }
+
+  return candidate.stopReason;
+}
+
+function extractAssistantStopReasonFromMessages(messages: unknown[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const stopReason = extractAssistantStopReason(messages[i]);
+    if (stopReason) return stopReason;
+  }
+  return undefined;
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /abort/i.test(message);
+}
+
 interface ManagedSession {
   session: AgentSession;
   queue: Promise<void>;
+  isRunning: boolean;
+  abortRequested: boolean;
 }
 
 export class PiSessionRegistry {
@@ -60,12 +88,50 @@ export class PiSessionRegistry {
 
   constructor(private readonly config: RuntimeConfig) {}
 
+  async abort(sessionId: string): Promise<{ aborted: boolean; reason?: string }> {
+    const managed = this.sessions.get(sessionId);
+    if (!managed) {
+      return { aborted: false, reason: 'not_found' };
+    }
+
+    if (!managed.isRunning) {
+      return { aborted: false, reason: 'idle' };
+    }
+
+    if (managed.abortRequested) {
+      return { aborted: true, reason: 'already_requested' };
+    }
+
+    managed.abortRequested = true;
+    await this.publish(sessionId, {
+      type: 'runtime.prompt.abort.requested',
+      payload: {},
+    });
+
+    try {
+      await managed.session.abort();
+      return { aborted: true };
+    } catch (error) {
+      managed.abortRequested = false;
+      await this.publish(sessionId, {
+        type: 'runtime.error',
+        payload: {
+          message: error instanceof Error ? error.message : 'Unknown runtime error',
+        },
+      });
+      return { aborted: false, reason: 'error' };
+    }
+  }
+
   async enqueuePrompt(sessionId: string, text: string): Promise<void> {
     const managed = await this.getOrCreate(sessionId);
 
     managed.queue = managed.queue
       .catch(() => undefined)
       .then(async () => {
+        managed.isRunning = true;
+        managed.abortRequested = false;
+
         await this.publish(sessionId, {
           type: 'session.status',
           payload: { status: 'active' },
@@ -78,13 +144,20 @@ export class PiSessionRegistry {
         try {
           await managed.session.prompt(text);
         } catch (error) {
-          await this.publish(sessionId, {
-            type: 'runtime.error',
-            payload: {
-              message: error instanceof Error ? error.message : 'Unknown runtime error',
-            },
-          });
+          const aborted = managed.abortRequested || isAbortLikeError(error);
+
+          if (!aborted) {
+            await this.publish(sessionId, {
+              type: 'runtime.error',
+              payload: {
+                message: error instanceof Error ? error.message : 'Unknown runtime error',
+              },
+            });
+          }
         } finally {
+          managed.isRunning = false;
+          managed.abortRequested = false;
+
           await this.publish(sessionId, {
             type: 'session.status',
             payload: { status: 'idle' },
@@ -101,6 +174,8 @@ export class PiSessionRegistry {
     const managed: ManagedSession = {
       session,
       queue: Promise.resolve(),
+      isRunning: false,
+      abortRequested: false,
     };
     this.sessions.set(sessionId, managed);
     return managed;
@@ -183,6 +258,14 @@ export class PiSessionRegistry {
       case 'agent_end': {
         const messages = Array.isArray(event.messages) ? event.messages : [];
         const finalText = extractAssistantTextFromMessages(messages);
+        const stopReason = extractAssistantStopReasonFromMessages(messages);
+
+        if (stopReason === 'aborted') {
+          await this.publish(sessionId, {
+            type: 'runtime.prompt.aborted',
+            payload: {},
+          });
+        }
 
         if (finalText) {
           await this.publish(sessionId, {

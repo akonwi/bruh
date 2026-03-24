@@ -39,6 +39,8 @@ export class SessionDO {
         return this.handleStream(request);
       case 'POST /prompt':
         return this.handlePrompt(request);
+      case 'POST /abort':
+        return this.handleAbort();
       case 'POST /events':
         return this.handleIncomingEvent(request);
       default:
@@ -94,6 +96,12 @@ export class SessionDO {
 
     this.state.waitUntil(this.forwardPromptToRuntime(meta.sessionId, text));
     return Response.json({ ok: true, sessionId: meta.sessionId, queued: true });
+  }
+
+  private async handleAbort(): Promise<Response> {
+    const meta = await this.ensureMeta();
+    this.state.waitUntil(this.forwardAbortToRuntime(meta.sessionId));
+    return Response.json({ ok: true, sessionId: meta.sessionId, requested: true });
   }
 
   private async handleIncomingEvent(request: Request): Promise<Response> {
@@ -248,6 +256,7 @@ export class SessionDO {
         const details = await response.text().catch(() => '');
         await this.setStatus('idle');
         await this.appendEvent('runtime.forward.error', {
+          action: 'prompt',
           status: response.status,
           details,
         });
@@ -255,6 +264,31 @@ export class SessionDO {
     } catch (error) {
       await this.setStatus('idle');
       await this.appendEvent('runtime.forward.error', {
+        action: 'prompt',
+        message: error instanceof Error ? error.message : 'Failed to reach runtime',
+      });
+    }
+  }
+
+  private async forwardAbortToRuntime(sessionId: string): Promise<void> {
+    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://localhost:8788').replace(/\/+$/, '');
+
+    try {
+      const response = await fetch(`${runtimeBaseUrl}/internal/sessions/${sessionId}/abort`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const details = await response.text().catch(() => '');
+        await this.appendEvent('runtime.forward.error', {
+          action: 'abort',
+          status: response.status,
+          details,
+        });
+      }
+    } catch (error) {
+      await this.appendEvent('runtime.forward.error', {
+        action: 'abort',
         message: error instanceof Error ? error.message : 'Failed to reach runtime',
       });
     }

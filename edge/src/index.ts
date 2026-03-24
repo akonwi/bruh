@@ -55,6 +55,13 @@ app.post('/sessions/:sessionId/prompt', async (c) => {
   });
 });
 
+app.post('/sessions/:sessionId/abort', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  return getSessionStub(c.env, sessionId).fetch('https://session/abort', {
+    method: 'POST',
+  });
+});
+
 app.post('/internal/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
@@ -76,6 +83,7 @@ app.get('/', (c) => {
       getSession: 'GET /sessions/:sessionId',
       streamSession: 'GET /sessions/:sessionId/stream',
       promptSession: 'POST /sessions/:sessionId/prompt',
+      abortSession: 'POST /sessions/:sessionId/abort',
       ingestEvents: 'POST /internal/sessions/:sessionId/events',
     },
   });

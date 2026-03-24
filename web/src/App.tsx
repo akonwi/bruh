@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
+  abortSession,
   createSession,
   createSessionStream,
   getSession,
@@ -21,6 +22,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [isAborting, setIsAborting] = useState(false)
   const latestSeqRef = useRef(0)
 
   useEffect(() => {
@@ -65,6 +67,21 @@ function App() {
         setEvents((current) => {
           if (current.some((entry) => entry.seq === event.seq)) return current
           return [...current, event].sort((a, b) => a.seq - b.seq)
+        })
+        setSession((current) => {
+          if (!current || current.sessionId !== event.sessionId) return current
+
+          const nextStatus =
+            event.type === 'session.status' && typeof event.payload.status === 'string'
+              ? (event.payload.status as SessionState['status'])
+              : current.status
+
+          return {
+            ...current,
+            status: nextStatus,
+            latestSeq: Math.max(current.latestSeq, event.seq),
+            updatedAt: event.timestamp,
+          }
         })
       }
 
@@ -111,11 +128,27 @@ function App() {
     setError(null)
     try {
       await sendPrompt(session.sessionId, prompt.trim())
+      setSession((current) =>
+        current ? { ...current, status: 'active' } : current,
+      )
       setPrompt('')
     } catch (promptError) {
       setError(promptError instanceof Error ? promptError.message : 'Failed to send prompt')
     } finally {
       setIsSending(false)
+    }
+  }
+
+  const handleAbort = async () => {
+    if (!session) return
+    setIsAborting(true)
+    setError(null)
+    try {
+      await abortSession(session.sessionId)
+    } catch (abortError) {
+      setError(abortError instanceof Error ? abortError.message : 'Failed to abort prompt')
+    } finally {
+      setIsAborting(false)
     }
   }
 
@@ -132,6 +165,8 @@ function App() {
         return 'text-muted-foreground'
     }
   }, [streamStatus])
+
+  const isSessionActive = session?.status === 'active'
 
   const assistantText = useMemo(() => {
     const deltaText = events
@@ -211,9 +246,21 @@ function App() {
                 <p className="text-xs text-muted-foreground">
                   Prompts are forwarded through the SessionDO to the local Pi runtime.
                 </p>
-                <Button onClick={handleSendPrompt} disabled={!session || !prompt.trim() || isSending}>
-                  {isSending ? 'Sending…' : 'Send prompt'}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleAbort}
+                    disabled={!session || !isSessionActive || isAborting}
+                  >
+                    {isAborting ? 'Aborting…' : 'Abort'}
+                  </Button>
+                  <Button
+                    onClick={handleSendPrompt}
+                    disabled={!session || !prompt.trim() || isSending || isSessionActive}
+                  >
+                    {isSending ? 'Sending…' : 'Send prompt'}
+                  </Button>
+                </div>
               </div>
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
             </div>

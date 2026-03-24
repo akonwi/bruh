@@ -58,6 +58,19 @@ export async function sendPrompt(sessionId: string, text: string): Promise<void>
   }
 }
 
+export async function abortSession(sessionId: string): Promise<void> {
+  const targetPath = import.meta.env.DEV
+    ? runtimeApiUrl(`/internal/sessions/${sessionId}/abort`)
+    : apiUrl(`/sessions/${sessionId}/abort`)
+
+  const response = await fetch(targetPath, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to abort prompt: ${response.status}`);
+  }
+}
+
 export function createSessionStream(sessionId: string, after = 0): EventSource {
   const url = new URL(apiUrl(`/sessions/${sessionId}/stream`), window.location.origin);
   if (after > 0) url.searchParams.set('after', String(after));

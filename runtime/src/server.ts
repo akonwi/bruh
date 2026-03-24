@@ -29,6 +29,12 @@ app.post('/internal/sessions/:sessionId/prompt', async (c) => {
   return c.json({ ok: true, sessionId, queued: true }, 202);
 });
 
+app.post('/internal/sessions/:sessionId/abort', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const result = await registry.abort(sessionId);
+  return c.json({ ok: true, sessionId, ...result });
+});
+
 app.get('/', (c) => {
   return c.json({
     ok: true,
