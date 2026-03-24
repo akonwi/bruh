@@ -58,8 +58,11 @@ export class SessionDO {
 
   private async handleInit(request?: Request): Promise<Response> {
     const existing = await this.state.storage.get<SessionMetadata>(META_KEY);
-    const body = request ? ((await request.json().catch(() => ({}))) as { sessionId?: string }) : {};
+    const body = request
+      ? ((await request.json().catch(() => ({}))) as { sessionId?: string; title?: string })
+      : {};
 
+    const requestedTitle = body.title?.trim();
     const meta =
       existing ??
       ({
@@ -68,10 +71,15 @@ export class SessionDO {
         updatedAt: new Date().toISOString(),
         latestSeq: 0,
         status: 'idle',
+        title: requestedTitle || undefined,
       } satisfies SessionMetadata);
 
     if (!existing) {
       await this.saveMeta(meta);
+    } else if (requestedTitle && !existing.title) {
+      existing.title = requestedTitle;
+      existing.updatedAt = new Date().toISOString();
+      await this.saveMeta(existing);
     }
 
     const events = await this.getEvents();

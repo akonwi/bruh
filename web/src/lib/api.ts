@@ -35,6 +35,14 @@ export async function createSession(): Promise<SessionState> {
   return response.json();
 }
 
+export async function getMainSession(): Promise<SessionState> {
+  const response = await fetch(apiUrl('/main-session'));
+  if (!response.ok) {
+    throw new Error(`Failed to load main session: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function listSessions(): Promise<SessionState[]> {
   const response = await fetch(apiUrl('/sessions'));
   if (!response.ok) {

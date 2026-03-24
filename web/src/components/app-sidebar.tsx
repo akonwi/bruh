@@ -13,39 +13,31 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 
-
-export type AppView = 'base' | 'threads'
+export type AppSection = 'main' | 'threads'
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
-  activeView: AppView
-  onViewChange: (view: AppView) => void
-  onCreateSession: () => void
+  activeSection: AppSection
+  onNavigateMain: () => void
+  onNavigateThreads: () => void
+  onCreateThread: () => void
   isCreating: boolean
-
 }
 
-function SidebarHeaderContent({
-  onViewChange,
-}: {
-  onViewChange: (view: AppView) => void
-}) {
+function SidebarHeaderContent({ onNavigateMain }: { onNavigateMain: () => void }) {
   const { state } = useSidebar()
   const collapsed = state === 'collapsed'
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <SidebarMenuButton
-          size='lg'
-          tooltip='Bruh'
-          onClick={() => onViewChange('base')}
-        >
+        <SidebarMenuButton size='lg' tooltip='Main' onClick={onNavigateMain}>
           <div className='flex aspect-square size-8 items-center justify-center bg-sidebar-primary text-sidebar-primary-foreground'>
             <House weight='fill' />
           </div>
           {!collapsed ? (
             <div className='grid flex-1 text-left text-sm leading-tight'>
-              <span className='truncate font-semibold'>Bruh</span>
+              <span className='truncate font-semibold'>Main</span>
+              <span className='truncate text-xs text-sidebar-foreground/70'>Bruh</span>
             </div>
           ) : null}
         </SidebarMenuButton>
@@ -55,16 +47,17 @@ function SidebarHeaderContent({
 }
 
 export function AppSidebar({
-  activeView,
-  onViewChange,
-  onCreateSession,
+  activeSection,
+  onNavigateMain,
+  onNavigateThreads,
+  onCreateThread,
   isCreating,
   ...props
 }: AppSidebarProps) {
   return (
     <Sidebar collapsible='icon' {...props}>
       <SidebarHeader>
-        <SidebarHeaderContent onViewChange={onViewChange} />
+        <SidebarHeaderContent onNavigateMain={onNavigateMain} />
       </SidebarHeader>
 
       <SidebarContent>
@@ -73,26 +66,24 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 tooltip='Threads'
-                isActive={activeView === 'threads'}
-                onClick={() => onViewChange('threads')}
+                isActive={activeSection === 'threads'}
+                onClick={onNavigateThreads}
               >
                 <ChatsTeardrop />
                 <span>Threads</span>
               </SidebarMenuButton>
               <SidebarMenuAction
-                onClick={onCreateSession}
+                onClick={onCreateThread}
                 disabled={isCreating}
                 title='New thread'
               >
                 <Plus />
                 <span className='sr-only'>New thread</span>
               </SidebarMenuAction>
-
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
-
 
       <SidebarRail />
     </Sidebar>

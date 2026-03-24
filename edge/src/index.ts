@@ -5,6 +5,7 @@ import { SessionDO } from './session-do';
 import type { Env, SessionIndexEntry, SessionMetadata } from './session';
 
 const app = new Hono<{ Bindings: Env }>();
+const MAIN_SESSION_ID = 'main';
 
 app.use('*', cors({
   origin: '*',
@@ -17,20 +18,13 @@ app.get('/health', (c) => {
 });
 
 app.post('/sessions', async (c) => {
-  const sessionId = crypto.randomUUID();
-  const stub = getSessionStub(c.env, sessionId);
-  const response = await stub.fetch('https://session/init', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
-  });
-
-  if (!response.ok) {
-    return response;
-  }
-
-  const session = (await response.json()) as SessionMetadata;
+  const session = await initSession(c.env, crypto.randomUUID());
   await registerSession(c.env, session);
+  return c.json(session);
+});
+
+app.get('/main-session', async (c) => {
+  const session = await initSession(c.env, MAIN_SESSION_ID, 'Main');
   return c.json(session);
 });
 
@@ -43,7 +37,9 @@ app.get('/sessions', async (c) => {
   const { sessions: entries } = (await response.json()) as { sessions: SessionIndexEntry[] };
   const sessions = (
     await Promise.all(
-      entries.map(async ({ sessionId }) => {
+      entries
+        .filter(({ sessionId }) => sessionId !== MAIN_SESSION_ID)
+        .map(async ({ sessionId }) => {
         const sessionResponse = await getSessionStub(c.env, sessionId).fetch('https://session/state');
         if (!sessionResponse.ok) {
           return null;
@@ -59,8 +55,9 @@ app.get('/sessions', async (c) => {
 });
 
 app.get('/sessions/:sessionId', async (c) => {
-  const stub = getSessionStub(c.env, c.req.param('sessionId'));
-  return stub.fetch('https://session/state');
+  const session = await initSession(c.env, c.req.param('sessionId'));
+  await registerSession(c.env, session);
+  return c.json(session);
 });
 
 app.get('/sessions/:sessionId/events', async (c) => {
@@ -122,6 +119,7 @@ app.get('/', (c) => {
     message: 'Bruh edge worker scaffold is up.',
     routes: {
       createSession: 'POST /sessions',
+      getMainSession: 'GET /main-session',
       listSessions: 'GET /sessions',
       getSession: 'GET /sessions/:sessionId',
       streamSession: 'GET /sessions/:sessionId/stream',
@@ -137,12 +135,31 @@ function getSessionStub(env: Env, sessionId: string): DurableObjectStub {
   return env.SESSION_DO.get(id);
 }
 
+async function initSession(env: Env, sessionId: string, title?: string): Promise<SessionMetadata> {
+  const response = await getSessionStub(env, sessionId).fetch('https://session/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, title }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Failed to initialize session: ${response.status} ${body}`.trim());
+  }
+
+  return (await response.json()) as SessionMetadata;
+}
+
 function getSessionIndexStub(env: Env): DurableObjectStub {
   const id = env.SESSION_INDEX_DO.idFromName('sessions');
   return env.SESSION_INDEX_DO.get(id);
 }
 
 async function registerSession(env: Env, session: SessionMetadata): Promise<void> {
+  if (session.sessionId === MAIN_SESSION_ID) {
+    return;
+  }
+
   const response = await getSessionIndexStub(env).fetch('https://session-index/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
