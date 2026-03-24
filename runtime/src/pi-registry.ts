@@ -336,9 +336,17 @@ export class PiSessionRegistry {
   }
 
   private async publish(sessionId: string, input: PublishInput): Promise<void> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.config.internalApiSecret) {
+      headers['X-Bruh-Internal-Secret'] = this.config.internalApiSecret;
+    }
+
     const response = await fetch(`${this.config.edgeBaseUrl}/internal/sessions/${sessionId}/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         type: input.type,
         payload: input.payload,

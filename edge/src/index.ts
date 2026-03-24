@@ -3,6 +3,12 @@ import { Hono } from 'hono';
 import { SessionIndexDO } from './session-index-do';
 import { SessionDO } from './session-do';
 import type { Env, SessionIndexEntry, SessionMetadata } from './session';
+import {
+  buildStorageListPayload,
+  normalizeStoragePath,
+  normalizeStoragePrefix,
+  toStorageObjectPayload,
+} from './storage';
 
 const app = new Hono<{ Bindings: Env }>();
 const MAIN_SESSION_ID = 'main';
@@ -10,8 +16,23 @@ const MAIN_SESSION_ID = 'main';
 app.use('*', cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Last-Event-ID'],
+  allowHeaders: ['Content-Type', 'Last-Event-ID', 'X-Bruh-Internal-Secret'],
 }));
+
+app.use('/internal/*', async (c, next) => {
+  const configuredSecret = c.env.INTERNAL_API_SECRET?.trim();
+  if (!configuredSecret) {
+    await next();
+    return;
+  }
+
+  const providedSecret = c.req.header('x-bruh-internal-secret')?.trim();
+  if (providedSecret !== configuredSecret) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+
+  await next();
+});
 
 app.get('/health', (c) => {
   return c.json({ ok: true, service: 'edge', status: 'bootstrapped' });
@@ -112,6 +133,141 @@ app.post('/internal/sessions/:sessionId/events', async (c) => {
   });
 });
 
+app.get('/internal/storage/object', async (c) => {
+  try {
+    const path = normalizeStoragePath(c.req.query('path') ?? '');
+    const object = await c.env.MEMORY_BUCKET.get(path);
+    if (!object) {
+      return c.json({ error: 'not_found', path }, 404);
+    }
+
+    const content = await object.text();
+    return c.json(toStorageObjectPayload(object, content));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Invalid storage path' }, 400);
+  }
+});
+
+app.put('/internal/storage/object', async (c) => {
+  try {
+    const path = normalizeStoragePath(c.req.query('path') ?? '');
+    const body = (await c.req.json().catch(() => ({}))) as {
+      content?: string;
+      contentType?: string;
+      ifMatch?: string;
+    };
+
+    if (typeof body.content !== 'string') {
+      return c.json({ error: 'content must be a string' }, 400);
+    }
+
+    const result = await c.env.MEMORY_BUCKET.put(path, body.content, {
+      httpMetadata: {
+        contentType: body.contentType?.trim() || 'text/plain; charset=utf-8',
+      },
+      onlyIf: body.ifMatch ? { etagMatches: body.ifMatch } : undefined,
+    });
+
+    if (!result) {
+      return c.json({ error: 'precondition_failed', path }, 409);
+    }
+
+    return c.json({
+      ok: true,
+      path,
+      etag: result.etag,
+      version: result.version,
+      size: result.size,
+      uploadedAt: result.uploaded.toISOString(),
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Invalid write request' }, 400);
+  }
+});
+
+app.get('/internal/storage/list', async (c) => {
+  try {
+    const prefix = normalizeStoragePrefix(c.req.query('prefix'));
+    const limit = Number(c.req.query('limit') ?? '100');
+    const cursor = c.req.query('cursor') ?? undefined;
+    const recursive = c.req.query('recursive') === '1';
+
+    const result = await c.env.MEMORY_BUCKET.list({
+      prefix,
+      limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 100,
+      cursor,
+      delimiter: recursive ? undefined : '/',
+    });
+
+    return c.json(buildStorageListPayload(prefix, result));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Invalid list request' }, 400);
+  }
+});
+
+app.post('/internal/storage/edit', async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      path?: string;
+      oldText?: string;
+      newText?: string;
+      ifMatch?: string;
+    };
+    const path = normalizeStoragePath(body.path ?? '');
+
+    if (typeof body.oldText !== 'string' || body.oldText.length === 0) {
+      return c.json({ error: 'oldText must be a non-empty string' }, 400);
+    }
+
+    if (typeof body.newText !== 'string') {
+      return c.json({ error: 'newText must be a string' }, 400);
+    }
+
+    const object = await c.env.MEMORY_BUCKET.get(path);
+    if (!object) {
+      return c.json({ error: 'not_found', path }, 404);
+    }
+
+    if (body.ifMatch && object.etag !== body.ifMatch) {
+      return c.json({ error: 'precondition_failed', path }, 409);
+    }
+
+    const content = await object.text();
+    const occurrences = content.split(body.oldText).length - 1;
+
+    if (occurrences === 0) {
+      return c.json({ error: 'old_text_not_found', path }, 409);
+    }
+
+    if (occurrences > 1) {
+      return c.json({ error: 'old_text_ambiguous', path }, 409);
+    }
+
+    const nextContent = content.replace(body.oldText, body.newText);
+    const result = await c.env.MEMORY_BUCKET.put(path, nextContent, {
+      httpMetadata: {
+        contentType: object.httpMetadata?.contentType || 'text/plain; charset=utf-8',
+      },
+      onlyIf: { etagMatches: object.etag },
+    });
+
+    if (!result) {
+      return c.json({ error: 'precondition_failed', path }, 409);
+    }
+
+    return c.json({
+      ok: true,
+      path,
+      etag: result.etag,
+      version: result.version,
+      size: result.size,
+      uploadedAt: result.uploaded.toISOString(),
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Invalid edit request' }, 400);
+  }
+});
+
 app.get('/', (c) => {
   return c.json({
     ok: true,
@@ -126,6 +282,10 @@ app.get('/', (c) => {
       promptSession: 'POST /sessions/:sessionId/prompt',
       abortSession: 'POST /sessions/:sessionId/abort',
       ingestEvents: 'POST /internal/sessions/:sessionId/events',
+      getStorageObject: 'GET /internal/storage/object?path=memory/...',
+      putStorageObject: 'PUT /internal/storage/object?path=memory/...',
+      listStorageObjects: 'GET /internal/storage/list?prefix=memory/...',
+      editStorageObject: 'POST /internal/storage/edit',
     },
   });
 });

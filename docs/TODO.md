@@ -48,7 +48,7 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - [x] `cn()` utility
 - [x] Create app shell
 - [x] Create chat page skeleton
-- [ ] Create empty session list UI
+- [x] Create empty session list UI
 - [x] Add transport layer for session HTTP + SSE
 - [x] Add reconnect/resume behavior for SSE stream
 
@@ -60,10 +60,10 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 - [x] Add Wrangler config
 - [~] Add bindings:
   - [x] Durable Objects
-  - [ ] R2 bucket
+  - [x] R2 bucket
 - [ ] Add auth middleware placeholder for single-user access
 - [x] Add health endpoint
-- [ ] Add internal runtime auth mechanism (shared secret)
+- [x] Add internal runtime auth mechanism (shared secret)
 
 ---
 
@@ -76,13 +76,13 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 - [x] Add SSE stream endpoint: `GET /sessions/:id/stream`
 - [~] Add command intake endpoints routed through DO:
   - [x] `POST /sessions`
-  - [ ] `GET /sessions`
+  - [x] `GET /sessions`
   - [x] `GET /sessions/:id`
   - [x] `POST /sessions/:id/prompt`
   - [ ] `POST /sessions/:id/steer`
   - [ ] `POST /sessions/:id/follow-up`
-  - [ ] `POST /sessions/:id/abort`
-- [ ] Decide whether we need a `SessionIndexDO` immediately or later
+  - [x] `POST /sessions/:id/abort`
+- [x] Decide whether we need a `SessionIndexDO` immediately or later
 
 ---
 
@@ -92,8 +92,8 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 - [ ] Add Dockerfile suitable for Cloudflare sandbox/container
 - [x] Add Hono/Fastify server
 - [x] Add health endpoint
-- [ ] Add internal endpoints for edge-to-runtime calls
-- [ ] Add runtime config loader
+- [x] Add internal endpoints for edge-to-runtime calls
+- [x] Add runtime config loader
 - [ ] Decide runtime filesystem layout
   - [ ] working directory
   - [ ] Pi agent dir
@@ -117,7 +117,7 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - [x] prompt
   - [ ] steer
   - [ ] follow-up
-  - [ ] abort
+  - [x] abort
 
 ---
 
@@ -136,22 +136,22 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 ## 8. Durable memory / R2 storage
 
 ### 8.1 Edge internal storage API
-- [ ] Add internal storage auth between runtime and edge
-- [ ] Add `GET /internal/storage/object?path=...`
-- [ ] Add `PUT /internal/storage/object?path=...`
-- [ ] Add `GET /internal/storage/list?prefix=...`
-- [ ] Add `POST /internal/storage/edit`
-- [ ] Add optimistic concurrency/version checks
-- [ ] Define storage error format for conflicts/not found/etc.
+- [x] Add internal storage auth between runtime and edge
+- [x] Add `GET /internal/storage/object?path=...`
+- [x] Add `PUT /internal/storage/object?path=...`
+- [x] Add `GET /internal/storage/list?prefix=...`
+- [x] Add `POST /internal/storage/edit`
+- [~] Add optimistic concurrency/version checks
+- [x] Define storage error format for conflicts/not found/etc.
 
 ### 8.2 Runtime Pi extension for memory
-- [ ] Create `runtime/.pi/extensions/memory.ts`
-- [ ] Add tool: `memory_read(path)`
-- [ ] Add tool: `memory_write(path, content)`
-- [ ] Add tool: `memory_edit(path, oldText, newText)`
-- [ ] Add tool: `memory_list(prefix?)`
-- [ ] Add tool: `memory_append(path, content)`
-- [ ] Add clear tool descriptions/guidelines so the model uses them well
+- [x] Create `runtime/.pi/extensions/memory.ts`
+- [x] Add tool: `memory_read(path)`
+- [x] Add tool: `memory_write(path, content)`
+- [x] Add tool: `memory_edit(path, oldText, newText)`
+- [x] Add tool: `memory_list(prefix?)`
+- [x] Add tool: `memory_append(path, content)`
+- [x] Add clear tool descriptions/guidelines so the model uses them well
 
 ### 8.3 Initial memory conventions
 - [ ] Define `memory/profile.md`
@@ -164,15 +164,15 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 9. Basic product UX
 
-- [ ] New session flow in UI
-- [ ] Transcript rendering
-- [ ] Composer with prompt submit
-- [ ] Abort button
-- [ ] Session status indicator
-- [ ] Session list view
-- [ ] Open existing session
-- [ ] Empty state / first-run state
-- [ ] Error banners for runtime/stream/storage failures
+- [x] New session flow in UI
+- [x] Transcript rendering
+- [x] Composer with prompt submit
+- [x] Abort button
+- [x] Session status indicator
+- [x] Session list view
+- [x] Open existing session
+- [x] Empty state / first-run state
+- [x] Error banners for runtime/stream/storage failures
 
 ---
 

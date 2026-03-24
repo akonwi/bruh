@@ -18,6 +18,13 @@
       }
     ]
   },
+  "r2_buckets": [
+    {
+      "binding": "MEMORY_BUCKET",
+      "bucket_name": "bruh-memory",
+      "preview_bucket_name": "bruh-memory-preview"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1",

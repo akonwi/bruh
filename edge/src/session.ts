@@ -29,5 +29,7 @@ export interface SessionIndexEntry {
 export interface Env {
   SESSION_DO: DurableObjectNamespace;
   SESSION_INDEX_DO: DurableObjectNamespace;
+  MEMORY_BUCKET: R2Bucket;
   RUNTIME_BASE_URL?: string;
+  INTERNAL_API_SECRET?: string;
 }

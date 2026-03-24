@@ -8,6 +8,7 @@ export interface RuntimeConfig {
   agentDir: string;
   anthropicApiKey: string;
   anthropicModel: string;
+  internalApiSecret?: string;
 }
 
 export async function loadConfig(): Promise<RuntimeConfig> {
@@ -27,5 +28,6 @@ export async function loadConfig(): Promise<RuntimeConfig> {
     agentDir,
     anthropicApiKey,
     anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-20250514',
+    internalApiSecret: process.env.INTERNAL_API_SECRET?.trim() || undefined,
   };
 }
