@@ -11,6 +11,12 @@ const EVENTS_KEY = 'events';
 const MAX_BUFFERED_EVENTS = 200;
 const encoder = new TextEncoder();
 
+function createSessionTitle(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 72) return normalized;
+  return `${normalized.slice(0, 72).trimEnd()}…`;
+}
+
 interface SseClient {
   id: string;
   write: (chunk: string) => Promise<void>;
@@ -89,6 +95,8 @@ export class SessionDO {
       return Response.json({ error: 'text is required' }, { status: 400 });
     }
 
+    await this.maybeSetTitleFromText(text);
+
     await this.appendEvent('session.prompt.accepted', {
       text,
       message: 'Prompt accepted and queued for runtime processing',
@@ -112,6 +120,13 @@ export class SessionDO {
 
     if (body.type === 'session.status' && typeof body.payload?.status === 'string') {
       await this.setStatus(body.payload.status as SessionMetadata['status']);
+    }
+
+    if (
+      (body.type === 'session.prompt.accepted' || body.type === 'runtime.prompt.start') &&
+      typeof body.payload?.text === 'string'
+    ) {
+      await this.maybeSetTitleFromText(body.payload.text);
     }
 
     const event = await this.appendEvent(body.type, body.payload ?? {}, body.timestamp);
@@ -205,6 +220,18 @@ export class SessionDO {
   private async setStatus(status: SessionMetadata['status']): Promise<void> {
     const meta = await this.ensureMeta();
     meta.status = status;
+    meta.updatedAt = new Date().toISOString();
+    await this.saveMeta(meta);
+  }
+
+  private async maybeSetTitleFromText(text: string): Promise<void> {
+    const title = createSessionTitle(text);
+    if (!title) return;
+
+    const meta = await this.ensureMeta();
+    if (meta.title) return;
+
+    meta.title = title;
     meta.updatedAt = new Date().toISOString();
     await this.saveMeta(meta);
   }

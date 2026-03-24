@@ -35,6 +35,16 @@ export async function createSession(): Promise<SessionState> {
   return response.json();
 }
 
+export async function listSessions(): Promise<SessionState[]> {
+  const response = await fetch(apiUrl('/sessions'));
+  if (!response.ok) {
+    throw new Error(`Failed to list sessions: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { sessions?: SessionState[] };
+  return data.sessions ?? [];
+}
+
 export async function getSession(sessionId: string): Promise<SessionState> {
   const response = await fetch(apiUrl(`/sessions/${sessionId}`));
   if (!response.ok) {
