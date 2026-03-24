@@ -44,7 +44,8 @@ interface StorageWritePayload {
 
 const MEMORY_TOOL_GUIDELINES = [
   'Use memory tools for durable notes, profile information, project context, and summaries that should survive across threads.',
-  'Memory paths are relative to the memory root. Example paths: profile.md, notes/2026-03-24.md, projects/bruh/todo.md.',
+  'Memory paths are relative to the memory root. User preferences and standing operating preferences always belong in profile.md. Use notes/YYYY-MM-DD.md for dated notes and projects/<slug>/... for project context.',
+  'Session summaries live at sessions/<session-id>/summary.md and are usually auto-maintained by the runtime; read them to rehydrate a thread and only overwrite them intentionally.',
   'Use memory_list() to browse the memory tree before reading or editing unknown paths.',
 ]
 
