@@ -144,14 +144,17 @@ export class SessionDO {
     };
 
     this.clients.set(clientId, client);
-
-    const replay = (await this.getEvents()).filter((event) => event.seq > afterSeq);
-    await client.write(`: connected to ${meta.sessionId}\n\n`);
-    for (const event of replay) {
-      await client.write(formatSse(event));
-    }
-
     request.signal.addEventListener('abort', () => client.close(), { once: true });
+
+    this.state.waitUntil(
+      (async () => {
+        const replay = (await this.getEvents()).filter((event) => event.seq > afterSeq);
+        await client.write(`: connected to ${meta.sessionId}\n\n`);
+        for (const event of replay) {
+          await client.write(formatSse(event));
+        }
+      })().catch(() => client.close()),
+    );
 
     return new Response(stream.readable, {
       headers: {
