@@ -88,6 +88,62 @@ export class PiSessionRegistry {
 
   constructor(private readonly config: RuntimeConfig) {}
 
+  async steer(sessionId: string, text: string): Promise<{ queued: boolean; reason?: string }> {
+    const managed = this.sessions.get(sessionId);
+    if (!managed) {
+      return { queued: false, reason: 'not_found' };
+    }
+
+    if (!managed.isRunning) {
+      return { queued: false, reason: 'idle' };
+    }
+
+    try {
+      await managed.session.steer(text);
+      await this.publish(sessionId, {
+        type: 'runtime.steer.queued',
+        payload: { text },
+      });
+      return { queued: true };
+    } catch (error) {
+      await this.publish(sessionId, {
+        type: 'runtime.error',
+        payload: {
+          message: error instanceof Error ? error.message : 'Unknown runtime error',
+        },
+      });
+      return { queued: false, reason: 'error' };
+    }
+  }
+
+  async followUp(sessionId: string, text: string): Promise<{ queued: boolean; reason?: string }> {
+    const managed = this.sessions.get(sessionId);
+    if (!managed) {
+      return { queued: false, reason: 'not_found' };
+    }
+
+    if (!managed.isRunning) {
+      return { queued: false, reason: 'idle' };
+    }
+
+    try {
+      await managed.session.followUp(text);
+      await this.publish(sessionId, {
+        type: 'runtime.follow_up.queued',
+        payload: { text },
+      });
+      return { queued: true };
+    } catch (error) {
+      await this.publish(sessionId, {
+        type: 'runtime.error',
+        payload: {
+          message: error instanceof Error ? error.message : 'Unknown runtime error',
+        },
+      });
+      return { queued: false, reason: 'error' };
+    }
+  }
+
   async abort(sessionId: string): Promise<{ aborted: boolean; reason?: string }> {
     const managed = this.sessions.get(sessionId);
     if (!managed) {

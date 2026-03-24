@@ -21,17 +21,26 @@ import {
   abortSession,
   createSession,
   createSessionStream,
+  followUpSession,
   getMainSession,
   getSession,
   getSessionEvents,
   listSessions,
   sendPrompt,
+  steerSession,
   type SessionEventEnvelope,
   type SessionState,
 } from '@/lib/api'
 
 const MAIN_SESSION_ID = 'main'
-const USER_EVENT_TYPES = new Set(['session.prompt.accepted', 'runtime.prompt.start'])
+const USER_EVENT_TYPES = new Set([
+  'session.prompt.accepted',
+  'session.steer.accepted',
+  'session.follow_up.accepted',
+  'runtime.prompt.start',
+  'runtime.steer.queued',
+  'runtime.follow_up.queued',
+])
 const ASSISTANT_COMPLETE_EVENT_TYPES = new Set([
   'assistant.message.complete',
   'assistant.turn.complete',
@@ -42,6 +51,7 @@ type StreamStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'erro
 type ChatMessageRole = 'user' | 'assistant' | 'system'
 type ChatMessageStatus = 'complete' | 'streaming' | 'aborted' | 'error'
 type ToolActivityStatus = 'running' | 'success' | 'error'
+type QueueMode = 'steer' | 'follow-up'
 type AppRoute =
   | { kind: 'main' }
   | { kind: 'threads' }
@@ -485,6 +495,7 @@ function App() {
   const [isCreating, setIsCreating] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [isAborting, setIsAborting] = useState(false)
+  const [queueMode, setQueueMode] = useState<QueueMode>('steer')
   const latestSeqRef = useRef(0)
   const pendingSessionRef = useRef<SessionState | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -743,15 +754,42 @@ function App() {
 
   const handleSendPrompt = async () => {
     const text = prompt.trim()
-    if (!text || !session || isSending || isAborting || session.status === 'active') return
+    if (!text || !session || isSending || isAborting) return
 
     setIsSending(true)
     setError(null)
 
     try {
+      const now = new Date().toISOString()
+
+      if (session.status === 'active') {
+        if (queueMode === 'steer') {
+          await steerSession(session.sessionId, text)
+        } else {
+          await followUpSession(session.sessionId, text)
+        }
+
+        setSession((current) =>
+          current && current.sessionId === session.sessionId
+            ? { ...current, updatedAt: now }
+            : current,
+        )
+
+        if (session.sessionId !== MAIN_SESSION_ID) {
+          setSessions((current) =>
+            upsertSession(current, {
+              ...session,
+              updatedAt: now,
+            }),
+          )
+        }
+
+        setPrompt('')
+        return
+      }
+
       await sendPrompt(session.sessionId, text)
 
-      const now = new Date().toISOString()
       const title = session.sessionId === MAIN_SESSION_ID ? 'Main' : session.title ?? createChatTitle(text)
 
       setSession((current) => {
@@ -1050,13 +1088,45 @@ function App() {
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
-                    placeholder={route.kind === 'main' ? 'Message Main…' : 'Message this thread…'}
+                    placeholder={
+                      isSessionActive
+                        ? queueMode === 'steer'
+                          ? 'Steer Bruh…'
+                          : 'Queue a follow-up for Bruh…'
+                        : route.kind === 'main'
+                          ? 'Message Main…'
+                          : 'Message this thread…'
+                    }
                     className='min-h-24 w-full resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]'
                     disabled={!session || isLoadingConversation || isSending || isAborting}
                   />
                   <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
                     <div className='min-w-0 text-xs text-muted-foreground'>
-                      {composerHelperText ? <span>{composerHelperText}</span> : null}
+                      {isSessionActive ? (
+                        <div className='flex flex-wrap items-center gap-2'>
+                          {composerHelperText ? <span>{composerHelperText}</span> : null}
+                          <div className='flex items-center gap-1'>
+                            <Button
+                              size='xs'
+                              variant={queueMode === 'steer' ? 'secondary' : 'outline'}
+                              onClick={() => setQueueMode('steer')}
+                              disabled={isSending || isAborting}
+                            >
+                              Steer
+                            </Button>
+                            <Button
+                              size='xs'
+                              variant={queueMode === 'follow-up' ? 'secondary' : 'outline'}
+                              onClick={() => setQueueMode('follow-up')}
+                              disabled={isSending || isAborting}
+                            >
+                              Follow-up
+                            </Button>
+                          </div>
+                        </div>
+                      ) : composerHelperText ? (
+                        <span>{composerHelperText}</span>
+                      ) : null}
                     </div>
                     {isSessionActive ? (
                       <Button

@@ -79,8 +79,8 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - [x] `GET /sessions`
   - [x] `GET /sessions/:id`
   - [x] `POST /sessions/:id/prompt`
-  - [ ] `POST /sessions/:id/steer`
-  - [ ] `POST /sessions/:id/follow-up`
+  - [x] `POST /sessions/:id/steer`
+  - [x] `POST /sessions/:id/follow-up`
   - [x] `POST /sessions/:id/abort`
 - [x] Decide whether we need a `SessionIndexDO` immediately or later
 
@@ -113,10 +113,10 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
   - [x] `.pi/AGENTS.md`
 - [ ] Start with restricted/baseline tool set
 - [x] Subscribe to Pi session events and normalize them for edge streaming
-- [~] Support runtime commands:
+- [x] Support runtime commands:
   - [x] prompt
-  - [ ] steer
-  - [ ] follow-up
+  - [x] steer
+  - [x] follow-up
   - [x] abort
 
 ---

@@ -47,6 +47,10 @@ export class SessionDO {
         return this.handleStream(request);
       case 'POST /prompt':
         return this.handlePrompt(request);
+      case 'POST /steer':
+        return this.handleQueuedCommand(request, 'steer');
+      case 'POST /follow-up':
+        return this.handleQueuedCommand(request, 'follow-up');
       case 'POST /abort':
         return this.handleAbort();
       case 'POST /events':
@@ -112,7 +116,36 @@ export class SessionDO {
       message: 'Prompt accepted and queued for runtime processing',
     });
 
-    this.state.waitUntil(this.forwardPromptToRuntime(meta.sessionId, text));
+    this.state.waitUntil(this.forwardTextCommandToRuntime(meta.sessionId, 'prompt', text));
+    return Response.json({ ok: true, sessionId: meta.sessionId, queued: true });
+  }
+
+  private async handleQueuedCommand(
+    request: Request,
+    kind: 'steer' | 'follow-up',
+  ): Promise<Response> {
+    const meta = await this.ensureMeta();
+    const body = (await request.json()) as SessionPromptRequest;
+    const text = body.text?.trim();
+
+    if (!text) {
+      return Response.json({ error: 'text is required' }, { status: 400 });
+    }
+
+    const result = await this.forwardTextCommandToRuntime(meta.sessionId, kind, text);
+    if (!result.ok) {
+      return Response.json({ error: 'failed_to_queue', details: result.details }, { status: result.status ?? 409 });
+    }
+
+    const eventType = kind === 'steer' ? 'session.steer.accepted' : 'session.follow_up.accepted';
+    await this.appendEvent(eventType, {
+      text,
+      message:
+        kind === 'steer'
+          ? 'Steering instruction accepted and queued'
+          : 'Follow-up instruction accepted and queued',
+    });
+
     return Response.json({ ok: true, sessionId: meta.sessionId, queued: true });
   }
 
@@ -288,11 +321,15 @@ export class SessionDO {
     await Promise.allSettled(clients.map((client) => client.write(formatSse(event))));
   }
 
-  private async forwardPromptToRuntime(sessionId: string, text: string): Promise<void> {
+  private async forwardTextCommandToRuntime(
+    sessionId: string,
+    action: 'prompt' | 'steer' | 'follow-up',
+    text: string,
+  ): Promise<{ ok: boolean; status?: number; details?: string }> {
     const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://localhost:8788').replace(/\/+$/, '');
 
     try {
-      const response = await fetch(`${runtimeBaseUrl}/internal/sessions/${sessionId}/prompt`, {
+      const response = await fetch(`${runtimeBaseUrl}/internal/sessions/${sessionId}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -300,19 +337,28 @@ export class SessionDO {
 
       if (!response.ok) {
         const details = await response.text().catch(() => '');
-        await this.setStatus('idle');
+        if (action === 'prompt') {
+          await this.setStatus('idle');
+        }
         await this.appendEvent('runtime.forward.error', {
-          action: 'prompt',
+          action,
           status: response.status,
           details,
         });
+        return { ok: false, status: response.status, details };
       }
+
+      return { ok: true };
     } catch (error) {
-      await this.setStatus('idle');
+      const details = error instanceof Error ? error.message : 'Failed to reach runtime';
+      if (action === 'prompt') {
+        await this.setStatus('idle');
+      }
       await this.appendEvent('runtime.forward.error', {
-        action: 'prompt',
-        message: error instanceof Error ? error.message : 'Failed to reach runtime',
+        action,
+        message: details,
       });
+      return { ok: false, details };
     }
   }
 

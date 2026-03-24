@@ -29,6 +29,32 @@ app.post('/internal/sessions/:sessionId/prompt', async (c) => {
   return c.json({ ok: true, sessionId, queued: true }, 202);
 });
 
+app.post('/internal/sessions/:sessionId/steer', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.json<{ text?: string }>();
+  const text = body.text?.trim();
+
+  if (!text) {
+    return c.json({ error: 'text is required' }, 400);
+  }
+
+  const result = await registry.steer(sessionId, text);
+  return c.json({ ok: result.queued, sessionId, ...result }, result.queued ? 202 : 409);
+});
+
+app.post('/internal/sessions/:sessionId/follow-up', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.json<{ text?: string }>();
+  const text = body.text?.trim();
+
+  if (!text) {
+    return c.json({ error: 'text is required' }, 400);
+  }
+
+  const result = await registry.followUp(sessionId, text);
+  return c.json({ ok: result.queued, sessionId, ...result }, result.queued ? 202 : 409);
+});
+
 app.post('/internal/sessions/:sessionId/abort', async (c) => {
   const sessionId = c.req.param('sessionId');
   const result = await registry.abort(sessionId);

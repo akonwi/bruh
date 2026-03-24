@@ -76,6 +76,36 @@ export async function sendPrompt(sessionId: string, text: string): Promise<void>
   }
 }
 
+export async function steerSession(sessionId: string, text: string): Promise<void> {
+  const targetPath = import.meta.env.DEV
+    ? runtimeApiUrl(`/internal/sessions/${sessionId}/steer`)
+    : apiUrl(`/sessions/${sessionId}/steer`)
+
+  const response = await fetch(targetPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to steer session: ${response.status}`)
+  }
+}
+
+export async function followUpSession(sessionId: string, text: string): Promise<void> {
+  const targetPath = import.meta.env.DEV
+    ? runtimeApiUrl(`/internal/sessions/${sessionId}/follow-up`)
+    : apiUrl(`/sessions/${sessionId}/follow-up`)
+
+  const response = await fetch(targetPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to queue follow-up: ${response.status}`)
+  }
+}
+
 export async function abortSession(sessionId: string): Promise<void> {
   const targetPath = import.meta.env.DEV
     ? runtimeApiUrl(`/internal/sessions/${sessionId}/abort`)
