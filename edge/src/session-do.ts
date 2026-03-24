@@ -1,5 +1,11 @@
 import type { Env, SessionEventEnvelope, SessionMetadata, SessionPromptRequest } from './session';
 
+interface IncomingEvent {
+  type: string;
+  timestamp?: string;
+  payload?: Record<string, unknown>;
+}
+
 const META_KEY = 'meta';
 const EVENTS_KEY = 'events';
 const MAX_BUFFERED_EVENTS = 200;
@@ -33,6 +39,8 @@ export class SessionDO {
         return this.handleStream(request);
       case 'POST /prompt':
         return this.handlePrompt(request);
+      case 'POST /events':
+        return this.handleIncomingEvent(request);
       default:
         return new Response('Not found', { status: 404 });
     }
@@ -81,16 +89,25 @@ export class SessionDO {
 
     await this.appendEvent('session.prompt.accepted', {
       text,
-      message: 'Prompt accepted by SessionDO skeleton',
+      message: 'Prompt accepted and queued for runtime processing',
     });
 
-    await this.setStatus('active');
-    await this.appendEvent('session.runtime.placeholder', {
-      text: `Runtime wiring pending. Received prompt: ${text}`,
-    });
-    await this.setStatus('idle');
+    this.state.waitUntil(this.forwardPromptToRuntime(meta.sessionId, text));
+    return Response.json({ ok: true, sessionId: meta.sessionId, queued: true });
+  }
 
-    return Response.json({ ok: true, sessionId: meta.sessionId });
+  private async handleIncomingEvent(request: Request): Promise<Response> {
+    const body = (await request.json()) as IncomingEvent;
+    if (!body.type) {
+      return Response.json({ error: 'type is required' }, { status: 400 });
+    }
+
+    if (body.type === 'session.status' && typeof body.payload?.status === 'string') {
+      await this.setStatus(body.payload.status as SessionMetadata['status']);
+    }
+
+    const event = await this.appendEvent(body.type, body.payload ?? {}, body.timestamp);
+    return Response.json({ ok: true, seq: event.seq });
   }
 
   private async handleStream(request: Request): Promise<Response> {
@@ -184,16 +201,18 @@ export class SessionDO {
   private async appendEvent(
     type: string,
     payload: Record<string, unknown>,
+    timestamp?: string,
   ): Promise<SessionEventEnvelope> {
     const meta = await this.ensureMeta();
     meta.latestSeq += 1;
     meta.updatedAt = new Date().toISOString();
 
+    const eventTimestamp = timestamp || meta.updatedAt;
     const event: SessionEventEnvelope = {
       sessionId: meta.sessionId,
       seq: meta.latestSeq,
       type,
-      timestamp: meta.updatedAt,
+      timestamp: eventTimestamp,
       payload,
     };
 
@@ -210,6 +229,32 @@ export class SessionDO {
   private async broadcast(event: SessionEventEnvelope): Promise<void> {
     const clients = [...this.clients.values()];
     await Promise.allSettled(clients.map((client) => client.write(formatSse(event))));
+  }
+
+  private async forwardPromptToRuntime(sessionId: string, text: string): Promise<void> {
+    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://127.0.0.1:8788').replace(/\/+$/, '');
+
+    try {
+      const response = await fetch(`${runtimeBaseUrl}/internal/sessions/${sessionId}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text().catch(() => '');
+        await this.setStatus('idle');
+        await this.appendEvent('runtime.forward.error', {
+          status: response.status,
+          details,
+        });
+      }
+    } catch (error) {
+      await this.setStatus('idle');
+      await this.appendEvent('runtime.forward.error', {
+        message: error instanceof Error ? error.message : 'Failed to reach runtime',
+      });
+    }
   }
 }
 

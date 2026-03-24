@@ -15,7 +15,7 @@ export interface SessionEventEnvelope {
   payload: Record<string, unknown>;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? '';
+const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://127.0.0.1:8787' : '');
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;

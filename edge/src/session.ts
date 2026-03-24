@@ -23,4 +23,5 @@ export interface SessionPromptRequest {
 
 export interface Env {
   SESSION_DO: DurableObjectNamespace;
+  RUNTIME_BASE_URL?: string;
 }

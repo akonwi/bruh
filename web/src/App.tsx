@@ -133,6 +133,15 @@ function App() {
     }
   }, [streamStatus])
 
+  const assistantText = useMemo(
+    () =>
+      events
+        .filter((event) => event.type === 'assistant.text.delta')
+        .map((event) => String(event.payload.delta ?? ''))
+        .join(''),
+    [events],
+  )
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-10">
@@ -144,8 +153,9 @@ function App() {
                 Session DO + SSE skeleton
               </h1>
               <p className="text-sm leading-6 text-muted-foreground sm:text-base">
-                This is the first end-to-end checkpoint: create a session, attach to its Durable
-                Object stream, and emit skeleton prompt events before the Pi runtime is wired in.
+                This is the first real local checkpoint: create a session, attach to its Durable
+                Object stream, send prompts through the edge layer, and stream Anthropic-backed Pi
+                output back into the UI.
               </p>
             </div>
             <Button onClick={handleCreateSession} disabled={isCreating}>
@@ -178,17 +188,17 @@ function App() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <label className="text-sm font-medium">Skeleton prompt</label>
+              <label className="text-sm font-medium">Prompt</label>
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Send a stub prompt event through the SessionDO…"
+                placeholder="Ask Pi something…"
                 className="min-h-28 rounded-none border bg-background px-3 py-2 text-sm outline-none ring-0 transition focus:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
                 disabled={!session || isSending}
               />
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-muted-foreground">
-                  For now, prompts emit placeholder session events only.
+                  Prompts are forwarded through the SessionDO to the local Pi runtime.
                 </p>
                 <Button onClick={handleSendPrompt} disabled={!session || !prompt.trim() || isSending}>
                   {isSending ? 'Sending…' : 'Send prompt'}
@@ -198,35 +208,45 @@ function App() {
             </div>
           </article>
 
-          <article className="flex min-h-[32rem] flex-col border bg-card">
-            <div className="border-b px-4 py-3">
-              <h2 className="text-lg font-medium">Event stream</h2>
+          <article className="flex min-h-[32rem] flex-col gap-4 border bg-card p-4">
+            <div className="border-b pb-4">
+              <h2 className="text-lg font-medium">Assistant output</h2>
               <p className="text-sm text-muted-foreground">
-                Replayed and live events from the session Durable Object.
+                Streaming text assembled from `assistant.text.delta` events.
               </p>
             </div>
-            <div className="flex-1 overflow-auto p-4">
-              {events.length === 0 ? (
-                <div className="flex h-full min-h-64 items-center justify-center border border-dashed text-sm text-muted-foreground">
-                  No events yet.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {events.map((event) => (
-                    <div key={event.seq} className="border bg-background p-3">
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                          {event.type}
-                        </p>
-                        <span className="text-xs text-muted-foreground">seq {event.seq}</span>
+            <div className="min-h-40 border bg-background p-4 text-sm leading-7 whitespace-pre-wrap">
+              {assistantText || 'No assistant text yet.'}
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-medium">Event stream</h3>
+              <p className="mb-3 text-sm text-muted-foreground">
+                Replayed and live events from the session Durable Object.
+              </p>
+              <div className="max-h-[22rem] overflow-auto pr-1">
+                {events.length === 0 ? (
+                  <div className="flex min-h-40 items-center justify-center border border-dashed text-sm text-muted-foreground">
+                    No events yet.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {events.map((event) => (
+                      <div key={event.seq} className="border bg-background p-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            {event.type}
+                          </p>
+                          <span className="text-xs text-muted-foreground">seq {event.seq}</span>
+                        </div>
+                        <pre className="overflow-x-auto text-xs leading-6 text-foreground">
+                          {JSON.stringify(event.payload, null, 2)}
+                        </pre>
                       </div>
-                      <pre className="overflow-x-auto text-xs leading-6 text-foreground">
-                        {JSON.stringify(event.payload, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </article>
         </section>

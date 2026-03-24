@@ -1,8 +1,15 @@
+import { cors } from 'hono/cors';
 import { Hono } from 'hono';
 import { SessionDO } from './session-do';
 import type { Env } from './session';
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use('*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Last-Event-ID'],
+}));
 
 app.get('/health', (c) => {
   return c.json({ ok: true, service: 'edge', status: 'bootstrapped' });
@@ -48,6 +55,17 @@ app.post('/sessions/:sessionId/prompt', async (c) => {
   });
 });
 
+app.post('/internal/sessions/:sessionId/events', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+
+  return getSessionStub(c.env, sessionId).fetch('https://session/events', {
+    method: 'POST',
+    headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
+    body,
+  });
+});
+
 app.get('/', (c) => {
   return c.json({
     ok: true,
@@ -58,6 +76,7 @@ app.get('/', (c) => {
       getSession: 'GET /sessions/:sessionId',
       streamSession: 'GET /sessions/:sessionId/stream',
       promptSession: 'POST /sessions/:sessionId/prompt',
+      ingestEvents: 'POST /internal/sessions/:sessionId/events',
     },
   });
 });

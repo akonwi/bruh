@@ -103,18 +103,18 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 6. Pi SDK integration
 
-- [ ] Install `@mariozechner/pi-coding-agent`
-- [ ] Build Pi session factory around `createAgentSession()`
-- [ ] Configure runtime API keys with `AuthStorage.setRuntimeApiKey(...)`
-- [ ] Add `DefaultResourceLoader`
+- [x] Install `@mariozechner/pi-coding-agent`
+- [x] Build Pi session factory around `createAgentSession()`
+- [x] Configure runtime API keys with `AuthStorage.setRuntimeApiKey(...)`
+- [x] Add `DefaultResourceLoader`
 - [x] Add project-local `.pi/` layout in `runtime/`
   - [x] `.pi/extensions/`
   - [x] `.pi/skills/`
   - [x] `.pi/AGENTS.md`
 - [ ] Start with restricted/baseline tool set
-- [ ] Subscribe to Pi session events and normalize them for edge streaming
-- [ ] Support runtime commands:
-  - [ ] prompt
+- [x] Subscribe to Pi session events and normalize them for edge streaming
+- [~] Support runtime commands:
+  - [x] prompt
   - [ ] steer
   - [ ] follow-up
   - [ ] abort
@@ -123,13 +123,13 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ## 7. End-to-end session flow
 
-- [ ] Create session in edge
-- [ ] Start/reuse runtime Pi session from edge command flow
-- [ ] Forward runtime events back to `SessionDO`
-- [ ] Stream events to web via SSE
-- [ ] Render streaming assistant text in UI
+- [x] Create session in edge
+- [x] Start/reuse runtime Pi session from edge command flow
+- [x] Forward runtime events back to `SessionDO`
+- [x] Stream events to web via SSE
+- [x] Render streaming assistant text in UI
 - [ ] Render tool activity in UI
-- [ ] Handle reconnect with sequence replay
+- [x] Handle reconnect with sequence replay
 
 ---
 
