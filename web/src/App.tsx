@@ -256,7 +256,9 @@ function App() {
   const [isSending, setIsSending] = useState(false)
   const [isAborting, setIsAborting] = useState(false)
   const latestSeqRef = useRef(0)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageEndRef = useRef<HTMLDivElement | null>(null)
+  const isNearBottomRef = useRef(true)
 
   const activateSession = useCallback(
     async (nextSession: SessionState | null) => {
@@ -549,9 +551,22 @@ function App() {
     isSessionActive &&
     !(lastTranscriptMessage?.role === 'assistant' && lastTranscriptMessage.status === 'streaming')
 
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
     messageEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [transcript, showThinking])
+  }, [])
+
+  // Scroll to bottom when transcript changes, but only if user is near the bottom
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      scrollToBottom()
+    }
+  }, [transcript, showThinking, scrollToBottom])
+
+  // Always scroll to bottom when switching sessions
+  useEffect(() => {
+    isNearBottomRef.current = true
+    scrollToBottom()
+  }, [session?.sessionId, scrollToBottom])
 
   return (
     <SidebarProvider>
@@ -566,7 +581,7 @@ function App() {
         <header className='flex h-12 shrink-0 items-center gap-2 border-b'>
           <div className='flex items-center gap-2 px-4'>
             <SidebarTrigger className='-ml-1' />
-            <Separator orientation='vertical' className='mr-2 data-[orientation=vertical]:h-4' />
+            <Separator orientation='vertical' className='mr-2 !self-auto data-[orientation=vertical]:h-4' />
             <div className='flex items-center gap-2 text-sm'>
               <span className='truncate font-medium'>
                 {view === 'base' ? activeTitle : 'Threads'}
@@ -580,8 +595,16 @@ function App() {
 
         {view === 'base' ? (
           <div className='flex min-h-0 flex-1 flex-col'>
-            <div className='min-h-0 flex-1 overflow-y-auto'>
-              <div className='mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 sm:px-6'>
+            <div
+              ref={scrollRef}
+              className='min-h-0 flex-1 overflow-y-auto'
+              onScroll={() => {
+                const el = scrollRef.current
+                if (!el) return
+                isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+              }}
+            >
+              <div className='flex min-h-full flex-col justify-end gap-4 px-2 py-4'>
                 {!session ? (
                   <div className='flex min-h-[40vh] flex-col items-center justify-center gap-5 border border-dashed bg-card/70 px-6 py-12 text-center'>
                     <div className='flex flex-col gap-2'>
@@ -642,13 +665,13 @@ function App() {
 
                     return (
                       <div key={message.id} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
-                        <div className={cn('max-w-[88%] px-4 py-3 sm:max-w-[78%]', bubbleClasses)}>
-                          <p className='whitespace-pre-wrap text-sm leading-7 sm:text-[15px]'>
+                        <div className={cn('max-w-[88%] px-3 py-2 sm:max-w-[78%]', bubbleClasses)}>
+                          <p className='whitespace-pre-wrap text-sm leading-6 sm:text-[15px]'>
                             {message.text}
                           </p>
                           <p
                             className={cn(
-                              'mt-2 text-[11px]',
+                              'mt-1 text-[11px]',
                               isUser ? 'text-primary-foreground/70' : 'text-muted-foreground',
                             )}
                           >
@@ -672,8 +695,8 @@ function App() {
               </div>
             </div>
 
-            <div className='shrink-0 border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6'>
-              <div className='mx-auto flex w-full max-w-4xl flex-col gap-3'>
+            <div className='shrink-0 border-t bg-background/95 px-2 py-2 backdrop-blur'>
+              <div className='flex flex-col gap-2'>
                 {error ? (
                   <div className='border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'>
                     {error}
@@ -690,16 +713,10 @@ function App() {
                         ? 'Message Pi…'
                         : 'Type a message… a new thread will be created when you send it.'
                     }
-                    className='min-h-32 w-full resize-none border-0 bg-transparent px-4 py-4 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]'
+                    className='min-h-24 w-full resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]'
                     disabled={isSending || isAborting}
                   />
-                  <div className='flex flex-col gap-3 border-t px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
-                    <p className='text-xs text-muted-foreground'>
-                      {isSessionActive
-                        ? 'Pi is responding. You can keep drafting or stop the current run.'
-                        : 'Press Enter to send. Use Shift+Enter for a newline.'}
-                    </p>
-                    <div className='flex items-center gap-2 self-end sm:self-auto'>
+                  <div className='flex items-center justify-end gap-2 border-t px-2 py-2'>
                       <Button
                         variant='outline'
                         onClick={handleAbort}
@@ -723,7 +740,6 @@ function App() {
                         )}
                         {isSending ? 'Sending…' : 'Send'}
                       </Button>
-                    </div>
                   </div>
                 </div>
               </div>
