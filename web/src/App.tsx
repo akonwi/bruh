@@ -813,14 +813,6 @@ function App() {
     return getThreadTitle(session, transcript)
   }, [route.kind, session, transcript])
 
-  const activeModel = useMemo(() => {
-    const readyEvent = [...events]
-      .reverse()
-      .find((event) => event.type === 'runtime.session.ready')
-
-    return typeof readyEvent?.payload.modelId === 'string' ? readyEvent.payload.modelId : null
-  }, [events])
-
   const streamToneClass = useMemo(() => {
     switch (streamStatus) {
       case 'connected':
@@ -848,6 +840,18 @@ function App() {
       lastTranscriptItem.role === 'assistant' &&
       lastTranscriptItem.status === 'streaming'
     )
+
+  const composerHelperText = useMemo(() => {
+    if (!session) {
+      return isLoadingConversation ? 'Preparing conversation…' : 'Conversation unavailable'
+    }
+
+    if (isSessionActive) {
+      return 'Bruh is responding…'
+    }
+
+    return 'Press Enter to send. Shift+Enter for a new line.'
+  }, [isLoadingConversation, isSessionActive, session])
 
   const isShowingConversation = route.kind === 'main' || route.kind === 'thread'
   const currentThreadId = route.kind === 'thread' ? route.sessionId : null
@@ -1060,23 +1064,9 @@ function App() {
                   />
                   <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
                     <div className='min-w-0 text-xs text-muted-foreground'>
-                      {session ? (
-                        <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
-                          <span>{session.status === 'active' ? 'Responding' : 'Ready'}</span>
-                          <span>•</span>
-                          <span>{session.sessionId === MAIN_SESSION_ID ? 'Main' : shortId(session.sessionId)}</span>
-                          {activeModel ? (
-                            <>
-                              <span>•</span>
-                              <span className='truncate'>{activeModel}</span>
-                            </>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span>{isLoadingConversation ? 'Preparing conversation…' : 'Conversation unavailable'}</span>
-                      )}
+                      <span>{composerHelperText}</span>
                     </div>
-                    <div className='flex items-center gap-2'>
+                    {isSessionActive ? (
                       <Button
                         variant='outline'
                         onClick={handleAbort}
@@ -1089,9 +1079,10 @@ function App() {
                         )}
                         {isAborting ? 'Stopping…' : 'Stop'}
                       </Button>
+                    ) : (
                       <Button
                         onClick={handleSendPrompt}
-                        disabled={!session || !prompt.trim() || isSending || isAborting || isSessionActive}
+                        disabled={!session || !prompt.trim() || isSending || isAborting}
                       >
                         {isSending ? (
                           <SpinnerGap className='animate-spin' data-icon='inline-start' />
@@ -1100,7 +1091,7 @@ function App() {
                         )}
                         {isSending ? 'Sending…' : 'Send'}
                       </Button>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
