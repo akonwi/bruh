@@ -18,6 +18,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/api/, ''),
       },
+      '/runtime-api': {
+        target: 'http://localhost:8788',
+        changeOrigin: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/runtime-api/, ''),
+      },
     },
   },
 })

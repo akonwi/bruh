@@ -16,9 +16,15 @@ export interface SessionEventEnvelope {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '/api' : '');
+const RUNTIME_API_BASE =
+  import.meta.env.VITE_RUNTIME_API_BASE ?? (import.meta.env.DEV ? '/runtime-api' : API_BASE);
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
+}
+
+function runtimeApiUrl(path: string): string {
+  return `${RUNTIME_API_BASE}${path}`;
 }
 
 export async function createSession(): Promise<SessionState> {
@@ -38,7 +44,11 @@ export async function getSession(sessionId: string): Promise<SessionState> {
 }
 
 export async function sendPrompt(sessionId: string, text: string): Promise<void> {
-  const response = await fetch(apiUrl(`/sessions/${sessionId}/prompt`), {
+  const targetPath = import.meta.env.DEV
+    ? runtimeApiUrl(`/internal/sessions/${sessionId}/prompt`)
+    : apiUrl(`/sessions/${sessionId}/prompt`)
+
+  const response = await fetch(targetPath, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
