@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -129,6 +131,74 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+.transcript-markdown {
+  --tw-prose-body: currentColor;
+  --tw-prose-headings: currentColor;
+  --tw-prose-links: currentColor;
+  --tw-prose-bold: currentColor;
+  --tw-prose-kbd: currentColor;
+  --tw-prose-code: currentColor;
+  --tw-prose-pre-code: currentColor;
+  color: currentColor;
+  overflow-wrap: anywhere;
+}
+
+.transcript-markdown-assistant {
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
+.transcript-markdown-system,
+.transcript-markdown-user {
+  --tw-prose-lead: color-mix(in srgb, currentColor 72%, transparent);
+  --tw-prose-counters: color-mix(in srgb, currentColor 72%, transparent);
+  --tw-prose-bullets: color-mix(in srgb, currentColor 72%, transparent);
+  --tw-prose-hr: color-mix(in srgb, currentColor 18%, transparent);
+  --tw-prose-quotes: color-mix(in srgb, currentColor 80%, transparent);
+  --tw-prose-quote-borders: color-mix(in srgb, currentColor 18%, transparent);
+  --tw-prose-captions: color-mix(in srgb, currentColor 72%, transparent);
+  --tw-prose-pre-bg: color-mix(in srgb, currentColor 10%, transparent);
+  --tw-prose-th-borders: color-mix(in srgb, currentColor 18%, transparent);
+  --tw-prose-td-borders: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.transcript-markdown > :first-child {
+  margin-top: 0;
+}
+
+.transcript-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.transcript-markdown :where(a) {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.transcript-markdown :where(code) {
+  word-break: break-word;
+}
+
+.transcript-markdown :where(pre) {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+}
+
+.transcript-markdown :where(pre code) {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
 }
 
 @layer base {

@@ -12,6 +12,7 @@ import {
 } from '@phosphor-icons/react'
 
 import { AppSidebar } from '@/components/app-sidebar'
+import { MessageMarkdown } from '@/components/message-markdown'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
@@ -988,7 +989,7 @@ function App() {
                       return (
                         <div key={item.id} className='flex justify-center'>
                           <div className={cn('max-w-2xl border px-4 py-3 text-sm', tone)}>
-                            <p className='whitespace-pre-wrap leading-6'>{item.text}</p>
+                            <MessageMarkdown content={item.text} tone='system' />
                           </div>
                         </div>
                       )
@@ -1008,9 +1009,7 @@ function App() {
                     return (
                       <div key={item.id} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
                         <div className={cn('max-w-[88%] px-3 py-2 sm:max-w-[78%]', bubbleClasses)}>
-                          <p className='whitespace-pre-wrap text-sm leading-6 sm:text-[15px]'>
-                            {item.text}
-                          </p>
+                          <MessageMarkdown content={item.text} tone={isUser ? 'user' : 'assistant'} />
                           <p
                             className={cn(
                               'mt-1 text-[11px]',
