@@ -81,6 +81,19 @@ export async function abortSession(sessionId: string): Promise<void> {
   }
 }
 
+export async function getSessionEvents(sessionId: string, after = 0): Promise<SessionEventEnvelope[]> {
+  const url = new URL(apiUrl(`/sessions/${sessionId}/events`), window.location.origin);
+  if (after > 0) url.searchParams.set('after', String(after));
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to load session events: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { events?: SessionEventEnvelope[] };
+  return data.events ?? [];
+}
+
 export function createSessionStream(sessionId: string, after = 0): EventSource {
   const url = new URL(apiUrl(`/sessions/${sessionId}/stream`), window.location.origin);
   if (after > 0) url.searchParams.set('after', String(after));

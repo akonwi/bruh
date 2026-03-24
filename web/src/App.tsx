@@ -1,10 +1,24 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowSquareOut,
+  ChatsTeardrop,
+  ClockCounterClockwise,
+  Plus,
+  SpinnerGap,
+  StopCircle,
+} from '@phosphor-icons/react'
+
+import { AppSidebar, type AppView } from '@/components/app-sidebar'
 import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { cn } from '@/lib/utils'
 import {
   abortSession,
   createSession,
   createSessionStream,
   getSession,
+  getSessionEvents,
   listSessions,
   sendPrompt,
   type SessionEventEnvelope,
@@ -230,6 +244,7 @@ function buildTranscript(events: SessionEventEnvelope[]): ChatMessage[] {
 }
 
 function App() {
+  const [view, setView] = useState<AppView>('base')
   const [session, setSession] = useState<SessionState | null>(null)
   const [sessions, setSessions] = useState<SessionState[]>([])
   const [events, setEvents] = useState<SessionEventEnvelope[]>([])
@@ -243,20 +258,34 @@ function App() {
   const latestSeqRef = useRef(0)
   const messageEndRef = useRef<HTMLDivElement | null>(null)
 
-  const activateSession = useCallback((nextSession: SessionState | null) => {
-    latestSeqRef.current = 0
-    setEvents([])
-    setSession(nextSession)
-    setError(null)
+  const activateSession = useCallback(
+    async (nextSession: SessionState | null) => {
+      latestSeqRef.current = 0
+      setEvents([])
+      setSession(nextSession)
+      setError(null)
 
-    if (!nextSession) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
-      return
-    }
+      if (!nextSession) {
+        window.localStorage.removeItem(SESSION_STORAGE_KEY)
+        return
+      }
 
-    window.localStorage.setItem(SESSION_STORAGE_KEY, nextSession.sessionId)
-    setSessions((current) => upsertSession(current, nextSession))
-  }, [])
+      window.localStorage.setItem(SESSION_STORAGE_KEY, nextSession.sessionId)
+      setSessions((current) => upsertSession(current, nextSession))
+
+      try {
+        const historical = await getSessionEvents(nextSession.sessionId)
+        if (historical.length > 0) {
+          const maxSeq = historical.reduce((max, e) => Math.max(max, e.seq), 0)
+          latestSeqRef.current = maxSeq
+          setEvents(historical)
+        }
+      } catch {
+        // Stream will still deliver events as a fallback
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -404,6 +433,7 @@ function App() {
       const created = await createSession()
       setPrompt('')
       activateSession(created)
+      setView('base')
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Failed to create session')
     } finally {
@@ -411,14 +441,22 @@ function App() {
     }
   }
 
-  const handleSelectSession = (nextSession: SessionState) => {
-    if (session?.sessionId === nextSession.sessionId) return
-    activateSession(nextSession)
-  }
+  const openSession = useCallback(
+    (nextSession: SessionState) => {
+      if (session?.sessionId === nextSession.sessionId) {
+        setView('base')
+        return
+      }
+
+      activateSession(nextSession)
+      setView('base')
+    },
+    [activateSession, session?.sessionId],
+  )
 
   const handleSendPrompt = async () => {
     const text = prompt.trim()
-    if (!text || isSending || isAborting || (session?.status === 'active')) return
+    if (!text || isSending || isAborting || session?.status === 'active') return
 
     setIsSending(true)
     setError(null)
@@ -457,6 +495,7 @@ function App() {
       })
       setSessions((current) => upsertSession(current, optimisticSession))
       setPrompt('')
+      setView('base')
     } catch (promptError) {
       setError(promptError instanceof Error ? promptError.message : 'Failed to send prompt')
     } finally {
@@ -489,15 +528,7 @@ function App() {
 
   const activeTitle = useMemo(() => getSessionTitle(session, transcript), [session, transcript])
 
-  const activeModel = useMemo(() => {
-    const readyEvent = [...events]
-      .reverse()
-      .find((event) => event.type === 'runtime.session.ready')
-
-    return typeof readyEvent?.payload.modelId === 'string' ? readyEvent.payload.modelId : null
-  }, [events])
-
-  const streamTone = useMemo(() => {
+  const streamToneClass = useMemo(() => {
     switch (streamStatus) {
       case 'connected':
         return 'bg-emerald-500'
@@ -523,144 +554,61 @@ function App() {
   }, [transcript, showThinking])
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="border-b bg-muted/20 lg:border-r lg:border-b-0">
-          <div className="flex h-full max-h-screen flex-col">
-            <div className="border-b px-4 py-4 sm:px-5 sm:py-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-2">
-                  <p className="text-[11px] uppercase tracking-[0.32em] text-muted-foreground">
-                    Bruh
-                  </p>
-                  <div>
-                    <h1 className="text-xl font-semibold tracking-tight">Chats</h1>
-                    <p className="text-sm text-muted-foreground">
-                      Personal Pi runtime with session replay and abort support.
-                    </p>
-                  </div>
-                </div>
-                <Button onClick={handleCreateSession} disabled={isCreating} size="sm">
-                  {isCreating ? 'Creating…' : 'New chat'}
-                </Button>
-              </div>
-            </div>
+    <SidebarProvider>
+      <AppSidebar
+        activeView={view}
+        onViewChange={setView}
+        onCreateSession={handleCreateSession}
+        isCreating={isCreating}
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-              <div className="mb-3 flex items-center justify-between px-1">
-                <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-                  Recent
-                </p>
-                <span className="text-xs text-muted-foreground">{sessions.length}</span>
-              </div>
-
-              {isLoadingSessions && sessions.length === 0 ? (
-                <div className="border border-dashed bg-background/70 p-4 text-sm text-muted-foreground">
-                  Loading chats…
-                </div>
-              ) : sessions.length === 0 ? (
-                <div className="border border-dashed bg-background/70 p-4 text-sm text-muted-foreground">
-                  No chats yet. Start a new one to begin.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {sessions.map((item) => {
-                    const isActive = session?.sessionId === item.sessionId
-                    const title = item.title?.trim() || `Chat ${shortId(item.sessionId)}`
-
-                    return (
-                      <button
-                        key={item.sessionId}
-                        type="button"
-                        onClick={() => handleSelectSession(item)}
-                        className={`w-full border p-3 text-left transition-colors ${
-                          isActive
-                            ? 'border-foreground/15 bg-card shadow-sm'
-                            : 'border-border bg-background hover:bg-card'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="line-clamp-2 text-sm font-medium leading-5">{title}</p>
-                            <p className="mt-2 truncate text-xs text-muted-foreground">
-                              {shortId(item.sessionId)}
-                            </p>
-                          </div>
-                          <span
-                            className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
-                              item.status === 'active' ? 'bg-emerald-500' : 'bg-border'
-                            }`}
-                          />
-                        </div>
-                        <p className="mt-3 text-xs text-muted-foreground">
-                          {formatRelativeTime(item.updatedAt)}
-                        </p>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+      />
+      <SidebarInset className='overflow-hidden'>
+        <header className='flex h-12 shrink-0 items-center gap-2 border-b'>
+          <div className='flex items-center gap-2 px-4'>
+            <SidebarTrigger className='-ml-1' />
+            <Separator orientation='vertical' className='mr-2 data-[orientation=vertical]:h-4' />
+            <div className='flex items-center gap-2 text-sm'>
+              <span className='truncate font-medium'>
+                {view === 'base' ? activeTitle : 'Threads'}
+              </span>
+              {view === 'base' && session ? (
+                <span className={cn('size-2 shrink-0 rounded-full', streamToneClass)} />
+              ) : null}
             </div>
           </div>
-        </aside>
+        </header>
 
-        <section className="flex min-h-screen min-w-0 flex-col">
-          <header className="border-b bg-background/90 px-4 py-4 backdrop-blur sm:px-6">
-            <div className="mx-auto flex w-full max-w-3xl items-start justify-between gap-4">
-              <div className="min-w-0 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-xl font-semibold tracking-tight">{activeTitle}</h2>
-                  {session ? (
-                    <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs text-muted-foreground">
-                      <span className={`h-2 w-2 rounded-full ${streamTone}`} />
-                      {streamStatus}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                  {session ? (
-                    <>
-                      <span>{session.status === 'active' ? 'Pi is responding…' : 'Ready'}</span>
-                      <span>•</span>
-                      <span>{shortId(session.sessionId)}</span>
-                    </>
-                  ) : (
-                    <span>Pick a chat or start a new one.</span>
-                  )}
-                  {activeModel ? (
-                    <>
-                      <span>•</span>
-                      <span className="truncate">{activeModel}</span>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        {view === 'base' ? (
+          <div className='flex min-h-0 flex-1 flex-col'>
+            <div className='min-h-0 flex-1 overflow-y-auto'>
+              <div className='mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 sm:px-6'>
                 {!session ? (
-                  <div className="flex min-h-[40vh] flex-col items-center justify-center gap-5 border border-dashed bg-card/40 px-6 py-12 text-center">
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium uppercase tracking-[0.24em] text-muted-foreground">
-                        Welcome
-                      </p>
-                      <h3 className="text-3xl font-semibold tracking-tight">Start a new conversation</h3>
-                      <p className="max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
-                        Create a chat, ask something, and your session will stay replayable through
-                        the Durable Object stream.
+                  <div className='flex min-h-[40vh] flex-col items-center justify-center gap-5 border border-dashed bg-card/70 px-6 py-12 text-center'>
+                    <div className='flex flex-col gap-2'>
+                      <h3 className='text-3xl font-semibold tracking-tight'>Start a new thread</h3>
+                      <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
+                        Create a thread here, or jump to Threads to reopen an earlier session.
                       </p>
                     </div>
-                    <Button onClick={handleCreateSession} disabled={isCreating} size="lg">
-                      {isCreating ? 'Creating…' : 'New chat'}
-                    </Button>
+                    <div className='flex flex-wrap items-center justify-center gap-3'>
+                      <Button onClick={handleCreateSession} disabled={isCreating}>
+                        {isCreating ? (
+                          <SpinnerGap className='animate-spin' data-icon='inline-start' />
+                        ) : (
+                          <Plus data-icon='inline-start' />
+                        )}
+                        {isCreating ? 'Creating…' : 'New thread'}
+                      </Button>
+                      <Button variant='outline' onClick={() => setView('threads')}>
+                        <ChatsTeardrop data-icon='inline-start' />
+                        View threads
+                      </Button>
+                    </div>
                   </div>
                 ) : transcript.length === 0 ? (
-                  <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-dashed bg-card/40 px-6 py-12 text-center">
-                    <h3 className="text-2xl font-semibold tracking-tight">What do you want to work on?</h3>
-                    <p className="max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
+                  <div className='flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-dashed bg-card/70 px-6 py-12 text-center'>
+                    <h3 className='text-2xl font-semibold tracking-tight'>What do you want to work on?</h3>
+                    <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
                       Ask a question, inspect the repo, or have Pi help you plan the next change.
                     </p>
                   </div>
@@ -670,12 +618,12 @@ function App() {
                       const tone =
                         message.status === 'error'
                           ? 'border-destructive/30 bg-destructive/5 text-destructive'
-                          : 'border-border bg-muted/60 text-muted-foreground'
+                          : 'border-border bg-background text-muted-foreground'
 
                       return (
-                        <div key={message.id} className="flex justify-center">
-                          <div className={`max-w-2xl border px-4 py-3 text-sm ${tone}`}>
-                            <p className="whitespace-pre-wrap leading-6">{message.text}</p>
+                        <div key={message.id} className='flex justify-center'>
+                          <div className={cn('max-w-2xl border px-4 py-3 text-sm', tone)}>
+                            <p className='whitespace-pre-wrap leading-6'>{message.text}</p>
                           </div>
                         </div>
                       )
@@ -684,7 +632,7 @@ function App() {
                     const isUser = message.role === 'user'
                     const bubbleClasses = isUser
                       ? 'bg-primary text-primary-foreground'
-                      : 'border bg-card text-card-foreground'
+                      : 'border bg-background text-card-foreground shadow-sm'
                     const metaLabel =
                       message.status === 'streaming'
                         ? 'Thinking…'
@@ -693,18 +641,16 @@ function App() {
                           : formatMessageTime(message.timestamp)
 
                     return (
-                      <div
-                        key={message.id}
-                        className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div className={`max-w-[85%] px-4 py-3 sm:max-w-[78%] ${bubbleClasses}`}>
-                          <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
+                      <div key={message.id} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+                        <div className={cn('max-w-[88%] px-4 py-3 sm:max-w-[78%]', bubbleClasses)}>
+                          <p className='whitespace-pre-wrap text-sm leading-7 sm:text-[15px]'>
                             {message.text}
                           </p>
                           <p
-                            className={`mt-2 text-[11px] ${
-                              isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                            }`}
+                            className={cn(
+                              'mt-2 text-[11px]',
+                              isUser ? 'text-primary-foreground/70' : 'text-muted-foreground',
+                            )}
                           >
                             {metaLabel}
                           </p>
@@ -715,8 +661,8 @@ function App() {
                 )}
 
                 {showThinking ? (
-                  <div className="flex justify-start">
-                    <div className="border bg-card px-4 py-3 text-sm text-muted-foreground">
+                  <div className='flex justify-start'>
+                    <div className='border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm'>
                       Pi is thinking…
                     </div>
                   </div>
@@ -726,15 +672,15 @@ function App() {
               </div>
             </div>
 
-            <div className="border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6">
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+            <div className='shrink-0 border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6'>
+              <div className='mx-auto flex w-full max-w-4xl flex-col gap-3'>
                 {error ? (
-                  <div className="border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  <div className='border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'>
                     {error}
                   </div>
                 ) : null}
 
-                <div className="border bg-card shadow-sm">
+                <div className='border bg-card shadow-sm'>
                   <textarea
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
@@ -742,81 +688,149 @@ function App() {
                     placeholder={
                       session
                         ? 'Message Pi…'
-                        : 'Type a message… a new chat will be created when you send it.'
+                        : 'Type a message… a new thread will be created when you send it.'
                     }
-                    className="min-h-32 w-full resize-none border-0 bg-transparent px-4 py-4 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]"
+                    className='min-h-32 w-full resize-none border-0 bg-transparent px-4 py-4 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]'
                     disabled={isSending || isAborting}
                   />
-                  <div className="flex flex-col gap-3 border-t px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs text-muted-foreground">
+                  <div className='flex flex-col gap-3 border-t px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
+                    <p className='text-xs text-muted-foreground'>
                       {isSessionActive
-                        ? 'Pi is responding. You can wait or stop the current run.'
+                        ? 'Pi is responding. You can keep drafting or stop the current run.'
                         : 'Press Enter to send. Use Shift+Enter for a newline.'}
                     </p>
-                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <div className='flex items-center gap-2 self-end sm:self-auto'>
                       <Button
-                        variant="outline"
+                        variant='outline'
                         onClick={handleAbort}
                         disabled={!session || !isSessionActive || isAborting}
                       >
-                        {isAborting ? 'Aborting…' : 'Stop'}
+                        {isAborting ? (
+                          <SpinnerGap className='animate-spin' data-icon='inline-start' />
+                        ) : (
+                          <StopCircle data-icon='inline-start' />
+                        )}
+                        {isAborting ? 'Stopping…' : 'Stop'}
                       </Button>
                       <Button
                         onClick={handleSendPrompt}
                         disabled={!prompt.trim() || isSending || isAborting || isSessionActive}
                       >
+                        {isSending ? (
+                          <SpinnerGap className='animate-spin' data-icon='inline-start' />
+                        ) : (
+                          <ArrowSquareOut data-icon='inline-start' />
+                        )}
                         {isSending ? 'Sending…' : 'Send'}
                       </Button>
                     </div>
                   </div>
                 </div>
-
-                {session ? (
-                  <details className="border bg-card/50 px-4 py-3 text-sm text-muted-foreground">
-                    <summary className="cursor-pointer list-none font-medium text-foreground">
-                      Developer details
-                    </summary>
-                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                      <p>
-                        <span className="text-muted-foreground">Session:</span> {session.sessionId}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Events:</span> {events.length}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Latest seq:</span>{' '}
-                        {latestSeqRef.current}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Model:</span>{' '}
-                        {activeModel ?? 'Not ready yet'}
-                      </p>
-                    </div>
-                    <div className="mt-3 max-h-48 overflow-auto border bg-background p-3">
-                      <div className="flex flex-col gap-2">
-                        {events.slice(-12).map((event) => (
-                          <div key={event.seq} className="border bg-card px-3 py-2">
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                              <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                                {event.type}
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">seq {event.seq}</span>
-                            </div>
-                            <pre className="overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-foreground">
-                              {JSON.stringify(event.payload, null, 2)}
-                            </pre>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </details>
-                ) : null}
               </div>
             </div>
           </div>
-        </section>
-      </div>
-    </main>
+        ) : (
+          <div className='flex min-h-0 flex-1 flex-col'>
+            <div className='min-h-0 flex-1 overflow-y-auto'>
+              <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-6 sm:px-6'>
+                {isLoadingSessions && sessions.length === 0 ? (
+                  <div className='border border-dashed bg-card/70 px-4 py-6 text-sm text-muted-foreground'>
+                    Loading threads…
+                  </div>
+                ) : sessions.length === 0 ? (
+                  <div className='flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-dashed bg-card/70 px-6 py-12 text-center'>
+                    <h3 className='text-2xl font-semibold tracking-tight'>No threads yet</h3>
+                    <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
+                      Start your first thread to create a replayable session.
+                    </p>
+                    <Button onClick={handleCreateSession} disabled={isCreating}>
+                      {isCreating ? (
+                        <SpinnerGap className='animate-spin' data-icon='inline-start' />
+                      ) : (
+                        <Plus data-icon='inline-start' />
+                      )}
+                      {isCreating ? 'Creating…' : 'New thread'}
+                    </Button>
+                  </div>
+                ) : (
+                  sessions.map((item) => {
+                    const isCurrent = session?.sessionId === item.sessionId
+                    const title = item.title?.trim() || `Thread ${shortId(item.sessionId)}`
+
+                    return (
+                      <button
+                        key={item.sessionId}
+                        type='button'
+                        onClick={() => openSession(item)}
+                        className={cn(
+                          'flex w-full flex-col gap-4 border bg-background px-4 py-4 text-left transition-colors hover:bg-card sm:flex-row sm:items-center sm:justify-between',
+                          isCurrent && 'border-foreground/15 bg-card shadow-sm',
+                        )}
+                      >
+                        <div className='min-w-0 flex-1'>
+                          <div className='flex flex-wrap items-center gap-2'>
+                            <p className='line-clamp-2 text-base font-medium leading-6'>{title}</p>
+                            {isCurrent ? (
+                              <span className='border px-1.5 py-0.5 text-[11px] text-muted-foreground'>
+                                Current
+                              </span>
+                            ) : null}
+                            <span
+                              className={cn(
+                                'inline-flex items-center gap-2 border px-1.5 py-0.5 text-[11px]',
+                                item.status === 'active'
+                                  ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  'size-2 rounded-full',
+                                  item.status === 'active' ? 'bg-emerald-500' : 'bg-border',
+                                )}
+                              />
+                              {item.status === 'active' ? 'Active' : 'Idle'}
+                            </span>
+                          </div>
+
+                          <div className='mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground'>
+                            <span>{shortId(item.sessionId)}</span>
+                            <span>•</span>
+                            <span className='inline-flex items-center gap-1.5'>
+                              <ClockCounterClockwise />
+                              {formatRelativeTime(item.updatedAt)}
+                            </span>
+                          </div>
+                        </div>
+
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className='shrink-0 border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6'>
+              <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                <p className='text-sm text-muted-foreground'>
+                  {session
+                    ? `Current thread: ${activeTitle}`
+                    : 'Select a thread to reopen it in Base, or start a new one.'}
+                </p>
+                <Button onClick={handleCreateSession} disabled={isCreating}>
+                  {isCreating ? (
+                    <SpinnerGap className='animate-spin' data-icon='inline-start' />
+                  ) : (
+                    <Plus data-icon='inline-start' />
+                  )}
+                  {isCreating ? 'Creating…' : 'New thread'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
 

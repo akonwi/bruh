@@ -63,6 +63,15 @@ app.get('/sessions/:sessionId', async (c) => {
   return stub.fetch('https://session/state');
 });
 
+app.get('/sessions/:sessionId/events', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const after = c.req.query('after');
+  const targetUrl = new URL('https://session/events');
+  if (after) targetUrl.searchParams.set('after', after);
+
+  return getSessionStub(c.env, sessionId).fetch(targetUrl.toString(), { method: 'GET' });
+});
+
 app.get('/sessions/:sessionId/stream', async (c) => {
   const sessionId = c.req.param('sessionId');
   const after = c.req.query('after');

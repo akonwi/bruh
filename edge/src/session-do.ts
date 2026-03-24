@@ -41,6 +41,8 @@ export class SessionDO {
         return this.handleInit(request);
       case 'GET /state':
         return this.handleState();
+      case 'GET /events':
+        return this.handleGetEvents(request);
       case 'GET /stream':
         return this.handleStream(request);
       case 'POST /prompt':
@@ -131,6 +133,15 @@ export class SessionDO {
 
     const event = await this.appendEvent(body.type, body.payload ?? {}, body.timestamp);
     return Response.json({ ok: true, seq: event.seq });
+  }
+
+  private async handleGetEvents(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const afterParam = url.searchParams.get('after');
+    const afterSeq = Number(afterParam ?? '0') || 0;
+
+    const events = (await this.getEvents()).filter((event) => event.seq > afterSeq);
+    return Response.json({ events });
   }
 
   private async handleStream(request: Request): Promise<Response> {
