@@ -193,22 +193,60 @@ function truncateInline(value: string, maxLength = 72): string {
   return `${value.slice(0, maxLength).trimEnd()}…`
 }
 
+function getToolPath(args?: Record<string, unknown>): string | undefined {
+  return typeof args?.path === 'string' && args.path ? args.path : undefined
+}
+
+function getToolPrefix(args?: Record<string, unknown>): string | undefined {
+  return typeof args?.prefix === 'string' && args.prefix ? args.prefix : undefined
+}
+
 function summarizeToolActivity(toolName: string, args?: Record<string, unknown>): string {
-  const label = formatToolName(toolName)
-  const candidate =
-    (typeof args?.path === 'string' && args.path) ||
-    (typeof args?.prefix === 'string' && args.prefix) ||
-    (typeof args?.command === 'string' && args.command) ||
-    (typeof args?.url === 'string' && args.url) ||
-    (typeof args?.pattern === 'string' && args.pattern) ||
-    (typeof args?.name === 'string' && args.name) ||
-    undefined
+  const path = getToolPath(args)
+  const prefix = getToolPrefix(args)
 
-  if (!candidate) {
-    return label
+  switch (toolName) {
+    case 'memory_read':
+      return `Recalling ${truncateInline(path ?? 'memory')}`
+    case 'memory_write':
+      return `Saved ${truncateInline(path ?? 'memory file')}`
+    case 'memory_edit':
+      return `Editing ${truncateInline(path ?? 'memory file')}`
+    case 'memory_append':
+      return `Saved ${truncateInline(path ?? 'memory file')}`
+    case 'memory_list':
+      return `Recalling ${truncateInline(prefix || 'memory/')}`
+    case 'read':
+      return `Opened ${truncateInline(path ?? 'file')}`
+    case 'write':
+      return `Saved ${truncateInline(path ?? 'file')}`
+    case 'edit':
+      return `Editing ${truncateInline(path ?? 'file')}`
+    case 'bash':
+      return `Ran ${truncateInline(typeof args?.command === 'string' ? args.command : 'command')}`
+    case 'grep':
+    case 'rg': {
+      const pattern = typeof args?.pattern === 'string' ? args.pattern : 'pattern'
+      const target = path ?? (typeof args?.glob === 'string' ? args.glob : 'workspace')
+      return `Searched for ${truncateInline(`"${pattern}" in ${target}`)}`
+    }
+    default: {
+      const candidate =
+        path ||
+        prefix ||
+        (typeof args?.command === 'string' && args.command) ||
+        (typeof args?.url === 'string' && args.url) ||
+        (typeof args?.pattern === 'string' && args.pattern) ||
+        (typeof args?.name === 'string' && args.name) ||
+        undefined
+
+      if (!candidate) {
+        return formatToolName(toolName)
+      }
+
+      return `${formatToolName(toolName)} · ${truncateInline(candidate)}`
+    }
   }
-
-  return `${label} · ${truncateInline(candidate)}`
 }
 
 function formatToolArgs(args?: Record<string, unknown>): string | null {
@@ -830,7 +868,7 @@ function App() {
   }, [route.kind, session?.sessionId, scrollToBottom])
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className='h-svh max-h-svh overflow-hidden'>
       <AppSidebar
         activeSection={activeSection}
         onNavigateMain={handleNavigateMain}
@@ -838,8 +876,8 @@ function App() {
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
       />
-      <SidebarInset className='overflow-hidden'>
-        <header className='flex h-12 shrink-0 items-center gap-2 border-b'>
+      <SidebarInset className='h-svh min-h-0 max-h-svh overflow-hidden'>
+        <header className='sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur'>
           <div className='flex items-center gap-2 px-4'>
             <SidebarTrigger className='-ml-1' />
             <Separator orientation='vertical' className='mr-2 !self-auto data-[orientation=vertical]:h-4' />
@@ -856,7 +894,7 @@ function App() {
           <div className='flex min-h-0 flex-1 flex-col'>
             <div
               ref={scrollRef}
-              className='min-h-0 flex-1 overflow-y-auto'
+              className='min-h-0 flex-1 overflow-y-auto overscroll-contain'
               onScroll={() => {
                 const element = scrollRef.current
                 if (!element) return
@@ -885,13 +923,13 @@ function App() {
                     if (item.kind === 'tool') {
                       const panelTone =
                         item.status === 'running'
-                          ? 'border-amber-500/30 bg-amber-500/5'
+                          ? 'border-border bg-muted/35'
                           : item.status === 'error'
                             ? 'border-destructive/30 bg-destructive/5'
                             : 'border-emerald-500/30 bg-emerald-500/5'
                       const iconTone =
                         item.status === 'running'
-                          ? 'text-amber-600 dark:text-amber-300'
+                          ? 'text-muted-foreground'
                           : item.status === 'error'
                             ? 'text-destructive'
                             : 'text-emerald-600 dark:text-emerald-300'
@@ -1003,7 +1041,7 @@ function App() {
               </div>
             </div>
 
-            <div className='shrink-0 border-t bg-background/95 px-2 py-2 backdrop-blur'>
+            <div className='sticky bottom-0 z-20 shrink-0 border-t bg-background/95 px-2 py-2 backdrop-blur'>
               <div className='flex flex-col gap-2'>
                 {error ? (
                   <div className='border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'>
