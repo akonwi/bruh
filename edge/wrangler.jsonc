@@ -11,6 +11,10 @@
       {
         "name": "SESSION_DO",
         "class_name": "SessionDO"
+      },
+      {
+        "name": "SESSION_INDEX_DO",
+        "class_name": "SessionIndexDO"
       }
     ]
   },
@@ -18,6 +22,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["SessionDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["SessionIndexDO"]
     }
   ]
 }

@@ -21,7 +21,13 @@ export interface SessionPromptRequest {
   text: string;
 }
 
+export interface SessionIndexEntry {
+  sessionId: string;
+  createdAt: string;
+}
+
 export interface Env {
   SESSION_DO: DurableObjectNamespace;
+  SESSION_INDEX_DO: DurableObjectNamespace;
   RUNTIME_BASE_URL?: string;
 }
