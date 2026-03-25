@@ -90,19 +90,18 @@ Goal: one execution workspace per thread.
 
 Goal: let main understand side threads without loading every raw transcript.
 
-- [ ] Define a thread registry model
-- [ ] Track thread metadata:
-  - [ ] thread ID
-  - [ ] title
-  - [ ] created/updated timestamps
-  - [ ] status
+- [x] Add `thread_list` tool — lists side threads with title, status, last activity
+- [x] Add `thread_summary` tool — reads rolling summary of a specific thread
+- [x] Teach Bruh when to use thread tools in SYSTEM.md
+- [x] Ensure every thread keeps an up-to-date `memory/sessions/<thread-id>/summary.md`
+- [x] Let main surface side-thread status and summaries cleanly
+- [ ] Define a richer thread registry model (later, with Agents)
+- [ ] Track additional thread metadata:
   - [ ] sandbox ID
   - [ ] latest summary timestamp
-- [ ] Ensure every thread keeps an up-to-date `memory/sessions/<thread-id>/summary.md`
-- [ ] Let main surface side-thread status and summaries cleanly
-- [ ] Decide where the registry lives short-term vs long-term
-  - [ ] short-term transitional storage
-  - [ ] long-term Agent state / SQLite
+  - [ ] tags / parent thread
+- [ ] Decide where the registry lives long-term
+  - [ ] Agent state / SQLite
 
 ---
 

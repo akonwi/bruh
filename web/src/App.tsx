@@ -240,6 +240,12 @@ function summarizeToolActivity(toolName: string, args?: Record<string, unknown>)
       const target = path || 'workspace/'
       return `Searched for ${truncateInline(`"${query}" in ${target}`)}`
     }
+    case 'thread_list':
+      return 'Checking side threads'
+    case 'thread_summary': {
+      const threadId = typeof args?.threadId === 'string' ? args.threadId : 'thread'
+      return `Reading summary of ${truncateInline(threadId)}`
+    }
     case 'read':
       return `Opened ${truncateInline(path ?? 'file')}`
     case 'write':
