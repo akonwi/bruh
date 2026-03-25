@@ -23,7 +23,9 @@ interface BruhEnv {
   OPENAI_API_KEY?: string;
   INTERNAL_API_SECRET?: string;
   MCP_SERVERS?: string;
-  HOST?: string; // e.g. "http://localhost:8790" or "https://bruh-edge.akonwi.workers.dev"
+  HOST?: string;
+  APP_ORIGIN?: string;
+  GITHUB_MCP_TOKEN?: string;
   [key: string]: unknown;
 }
 
@@ -113,14 +115,13 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   async onStart(): Promise<void> {
     this.ensureSchema();
 
-    // After OAuth completes, redirect back to the app
-    // In dev, frontend runs on a different port than the edge worker
     const appOrigin = this.env.APP_ORIGIN?.trim() || '';
     this.mcp.configureOAuthCallback({
       successRedirect: `${appOrigin}/`,
       errorRedirect: `${appOrigin}/?mcp_error=1`,
     });
 
+    await this.connectDefaultMcpServers();
     await this.connectConfiguredMcpServers();
   }
 
@@ -140,6 +141,38 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         created_at TEXT NOT NULL
       )
     `;
+  }
+
+  // --- MCP default servers (token-based, no OAuth) ---
+
+  private static readonly DEFAULT_MCP_SERVERS: Array<{
+    name: string;
+    url: string;
+    tokenEnvVar: string;
+  }> = [
+    { name: 'github', url: 'https://api.githubcopilot.com/mcp/', tokenEnvVar: 'GITHUB_MCP_TOKEN' },
+  ];
+
+  private async connectDefaultMcpServers(): Promise<void> {
+    for (const server of BruhAgent.DEFAULT_MCP_SERVERS) {
+      const token = this.env[server.tokenEnvVar];
+      if (typeof token !== 'string' || !token.trim()) continue;
+
+      try {
+        const existing = this.getMcpServers();
+        const alreadyConnected = Object.values(existing.servers).some(
+          (s) => s.name === server.name && s.state !== 'failed',
+        );
+        if (alreadyConnected) continue;
+
+        await this.addMcpServer(server.name, server.url, {
+          transport: { headers: { Authorization: `Bearer ${token.trim()}` } },
+        });
+        console.log(`[BruhAgent] Connected default MCP server: ${server.name}`);
+      } catch (error) {
+        console.error(`[BruhAgent] Failed to connect default MCP server ${server.name}:`, error instanceof Error ? error.message : error);
+      }
+    }
   }
 
   // --- MCP config-driven connections ---

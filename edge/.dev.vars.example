@@ -9,5 +9,8 @@ HOST=http://localhost:8790
 # Frontend origin for post-OAuth redirect (dev only — not needed in production)
 APP_ORIGIN=http://localhost:5173
 
+# MCP server tokens (servers auto-connect when token is present)
+# GITHUB_MCP_TOKEN=ghp_your-github-token
+
 # Internal API secret for storage routes (optional for local dev)
 # INTERNAL_API_SECRET=your-secret-here
