@@ -188,6 +188,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       message?: string;
       delaySeconds?: number;
       scheduledAt?: string;
+      taskType?: 'task' | 'reminder';
     };
 
     const message = body.message?.trim();
@@ -208,12 +209,15 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       );
     }
 
-    const schedule = await this.schedule(when, 'executeScheduledTask', message);
+    const taskType = body.taskType || 'task';
+    const payload = JSON.stringify({ message, taskType });
+    const schedule = await this.schedule(when, 'executeScheduledTask', payload);
 
     return Response.json({
       ok: true,
       scheduleId: schedule.id,
       message,
+      taskType,
       type: schedule.type,
     });
   }
@@ -240,11 +244,28 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     return Response.json({ ok: true, cancelled });
   }
 
-  async executeScheduledTask(message: string): Promise<void> {
+  async executeScheduledTask(rawPayload: string): Promise<void> {
+    let message: string;
+    let taskType: 'task' | 'reminder';
+
+    try {
+      const parsed = JSON.parse(rawPayload) as { message?: string; taskType?: string };
+      message = parsed.message || rawPayload;
+      taskType = parsed.taskType === 'reminder' ? 'reminder' : 'task';
+    } catch {
+      message = rawPayload;
+      taskType = 'task';
+    }
+
     await this.appendEvent('schedule.fired', {
       message,
+      taskType,
       firedAt: new Date().toISOString(),
     });
+
+    if (taskType === 'task') {
+      await this.forwardTextCommandToRuntime(this.state.sessionId, 'prompt', message);
+    }
   }
 
   // --- Prompt / steer / follow-up / abort ---

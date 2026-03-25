@@ -17,9 +17,10 @@ interface ScheduleItem {
 }
 
 const SCHEDULE_TOOL_GUIDELINES = [
-  'Use scheduling tools to set reminders or timed tasks that fire in the current thread.',
-  'Scheduled tasks appear as events in the thread transcript when they fire.',
-  'Use schedule_set to create a reminder. Use schedule_list to see pending schedules. Use schedule_cancel to remove one.',
+  'Use scheduling tools to set tasks or reminders that fire in the current thread.',
+  'Tasks (type: "task", the default) prompt the agent to do real work when they fire. Reminders (type: "reminder") just show a notification.',
+  'Default to type "task" unless the user specifically asks for a reminder.',
+  'Use schedule_set to create a task or reminder. Use schedule_list to see pending schedules. Use schedule_cancel to remove one.',
 ]
 
 function getEdgeBaseUrl(): string {
@@ -70,10 +71,15 @@ export default function (pi: ExtensionAPI) {
     name: 'schedule_set',
     label: 'Schedule Reminder',
     description:
-      'Schedule a reminder or task in the current thread. When it fires, it appears as an event in the thread transcript.',
+      'Schedule a task or reminder in the current thread. Tasks prompt the agent to do real work when they fire. Reminders just show a notification.',
     promptGuidelines: SCHEDULE_TOOL_GUIDELINES,
     parameters: Type.Object({
-      message: Type.String({ description: 'What to remind about or what task to note' }),
+      message: Type.String({ description: 'What to do (task) or remind about (reminder)' }),
+      type: Type.Optional(
+        Type.Union([Type.Literal('task'), Type.Literal('reminder')], {
+          description: 'Whether to prompt the agent to act (task) or just notify (reminder). Default: task.',
+        }),
+      ),
       delayMinutes: Type.Optional(
         Type.Number({ description: 'Minutes from now to fire. Use this OR scheduledAt.' }),
       ),
@@ -84,11 +90,13 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { message, delayMinutes, scheduledAt } = params as {
+      const { message, type, delayMinutes, scheduledAt } = params as {
         message: string
+        type?: 'task' | 'reminder'
         delayMinutes?: number
         scheduledAt?: string
       }
+      const taskType = type || 'task'
 
       const trimmedMessage = message.trim()
       if (!trimmedMessage) {
@@ -97,7 +105,7 @@ export default function (pi: ExtensionAPI) {
 
       const sessionId = ctx.cwd.split('/').pop() || 'main'
 
-      const body: Record<string, unknown> = { message: trimmedMessage }
+      const body: Record<string, unknown> = { message: trimmedMessage, taskType }
       if (scheduledAt) {
         body.scheduledAt = scheduledAt
       } else if (delayMinutes && delayMinutes > 0) {
@@ -124,12 +132,13 @@ export default function (pi: ExtensionAPI) {
       const whenText = scheduledAt
         ? `at ${new Date(scheduledAt).toLocaleString()}`
         : `in ${formatDuration(Math.round((delayMinutes ?? 0) * 60))}`
+      const kindLabel = taskType === 'reminder' ? 'Reminder' : 'Task'
 
       return {
         content: [
           {
             type: 'text',
-            text: `Scheduled: "${trimmedMessage}" ${whenText} (id: ${result.scheduleId})`,
+            text: `${kindLabel} scheduled: "${trimmedMessage}" ${whenText} (id: ${result.scheduleId})`,
           },
         ],
         details: {
