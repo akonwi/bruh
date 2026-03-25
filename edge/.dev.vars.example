@@ -1,8 +1,7 @@
-# MCP server API keys / tokens
+# API keys for model providers (at least one required)
 # Copy this file to .dev.vars and fill in your values.
-# These are referenced by authEnvVar in the MCP_SERVERS wrangler config.
-#
-# Example wrangler.jsonc MCP_SERVERS config:
-# "MCP_SERVERS": "[{\"name\":\"zeabur\",\"url\":\"https://mcp.zeabur.com/mcp\",\"authEnvVar\":\"ZEABUR_API_KEY\"}]"
-#
-# ZEABUR_API_KEY=your-zeabur-api-key-here
+ANTHROPIC_API_KEY=your-anthropic-api-key
+# OPENAI_API_KEY=your-openai-api-key
+
+# Internal API secret for storage routes (optional for local dev)
+# INTERNAL_API_SECRET=your-secret-here

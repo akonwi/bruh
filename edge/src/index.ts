@@ -2,7 +2,7 @@ import { cors } from 'hono/cors';
 import { Hono } from 'hono';
 import { getAgentByName, routeAgentRequest } from 'agents';
 import { BruhAgent } from './bruh-agent';
-import type { Env, SessionIndexEntry, SessionMetadata } from './session';
+import type { SessionIndexEntry, SessionMetadata, Env } from './session';
 import {
   buildStorageListPayload,
   normalizeStoragePath,
@@ -39,6 +39,8 @@ app.get('/health', (c) => {
   return c.json({ ok: true, service: 'edge', status: 'bootstrapped' });
 });
 
+// --- Session management ---
+
 app.post('/sessions', async (c) => {
   const sessionId = crypto.randomUUID();
   const session = await initSession(c.env, sessionId);
@@ -54,9 +56,7 @@ app.get('/main-session', async (c) => {
 app.get('/sessions', async (c) => {
   const registryStub = await getAgentByName(c.env.BRUH_AGENT, REGISTRY_AGENT_NAME);
   const response = await registryStub.fetch(new Request('https://agent/threads'));
-  if (!response.ok) {
-    return response;
-  }
+  if (!response.ok) return response;
 
   const { sessions: entries } = (await response.json()) as { sessions: SessionIndexEntry[] };
   const sessions = (
@@ -84,12 +84,13 @@ app.get('/sessions/:sessionId', async (c) => {
   return c.json(session);
 });
 
+// --- SSE streaming (legacy event system for current web app) ---
+
 app.get('/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const after = c.req.query('after');
   const targetUrl = new URL('https://agent/events');
   if (after) targetUrl.searchParams.set('after', after);
-
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
   return stub.fetch(targetUrl.toString(), { method: 'GET' });
 });
@@ -99,21 +100,20 @@ app.get('/sessions/:sessionId/stream', async (c) => {
   const after = c.req.query('after');
   const targetUrl = new URL('https://agent/stream');
   if (after) targetUrl.searchParams.set('after', after);
-
   const request = new Request(targetUrl.toString(), {
     method: 'GET',
     headers: c.req.raw.headers,
   });
-
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
   return stub.fetch(request);
 });
+
+// --- Prompt / steer / follow-up / abort (now handled directly by AIChatAgent) ---
 
 app.post('/sessions/:sessionId/prompt', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
   return stub.fetch(new Request('https://agent/prompt', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
@@ -125,7 +125,6 @@ app.post('/sessions/:sessionId/steer', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
   return stub.fetch(new Request('https://agent/steer', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
@@ -137,7 +136,6 @@ app.post('/sessions/:sessionId/follow-up', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
   return stub.fetch(new Request('https://agent/follow-up', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
@@ -148,113 +146,16 @@ app.post('/sessions/:sessionId/follow-up', async (c) => {
 app.post('/sessions/:sessionId/abort', async (c) => {
   const sessionId = c.req.param('sessionId');
   const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
   return stub.fetch(new Request('https://agent/abort', { method: 'POST' }));
 });
 
-app.post('/internal/sessions/:sessionId/schedule', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-});
-
-app.get('/internal/sessions/:sessionId/schedules', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/schedules'));
-});
-
-app.post('/internal/sessions/:sessionId/cancel-schedule', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/cancel-schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-});
-
-app.post('/internal/sessions/:sessionId/mcp/connect', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/mcp/connect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-});
-
-app.post('/internal/sessions/:sessionId/mcp/disconnect', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/mcp/disconnect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-});
-
-app.get('/internal/sessions/:sessionId/mcp/servers', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/mcp/servers'));
-});
-
-app.get('/internal/sessions/:sessionId/mcp/tools', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/mcp/tools'));
-});
-
-app.post('/internal/sessions/:sessionId/mcp/call', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/mcp/call', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
-});
-
-app.post('/internal/sessions/:sessionId/events', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const body = await c.req.text();
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
-
-  return stub.fetch(new Request('https://agent/events', {
-    method: 'POST',
-    headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
-    body,
-  }));
-});
-
-// --- R2 storage routes (unchanged) ---
+// --- R2 storage routes ---
 
 app.get('/internal/storage/object', async (c) => {
   try {
     const path = normalizeStoragePath(c.req.query('path') ?? '');
     const object = await c.env.MEMORY_BUCKET.get(path);
-    if (!object) {
-      return c.json({ error: 'not_found', path }, 404);
-    }
-
+    if (!object) return c.json({ error: 'not_found', path }, 404);
     const content = await object.text();
     return c.json(toStorageObjectPayload(object, content));
   } catch (error) {
@@ -282,9 +183,7 @@ app.put('/internal/storage/object', async (c) => {
       onlyIf: body.ifMatch ? { etagMatches: body.ifMatch } : undefined,
     });
 
-    if (!result) {
-      return c.json({ error: 'precondition_failed', path }, 409);
-    }
+    if (!result) return c.json({ error: 'precondition_failed', path }, 409);
 
     return c.json({
       ok: true,
@@ -319,75 +218,8 @@ app.get('/internal/storage/list', async (c) => {
   }
 });
 
-app.post('/internal/storage/edit', async (c) => {
-  try {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      path?: string;
-      oldText?: string;
-      newText?: string;
-      ifMatch?: string;
-    };
-    const path = normalizeStoragePath(body.path ?? '');
-
-    if (typeof body.oldText !== 'string' || body.oldText.length === 0) {
-      return c.json({ error: 'oldText must be a non-empty string' }, 400);
-    }
-
-    if (typeof body.newText !== 'string') {
-      return c.json({ error: 'newText must be a string' }, 400);
-    }
-
-    const object = await c.env.MEMORY_BUCKET.get(path);
-    if (!object) {
-      return c.json({ error: 'not_found', path }, 404);
-    }
-
-    if (body.ifMatch && object.etag !== body.ifMatch) {
-      return c.json({ error: 'precondition_failed', path }, 409);
-    }
-
-    const content = await object.text();
-    const occurrences = content.split(body.oldText).length - 1;
-
-    if (occurrences === 0) {
-      return c.json({ error: 'old_text_not_found', path }, 409);
-    }
-
-    if (occurrences > 1) {
-      return c.json({ error: 'old_text_ambiguous', path }, 409);
-    }
-
-    const nextContent = content.replace(body.oldText, body.newText);
-    const result = await c.env.MEMORY_BUCKET.put(path, nextContent, {
-      httpMetadata: {
-        contentType: object.httpMetadata?.contentType || 'text/plain; charset=utf-8',
-      },
-      onlyIf: { etagMatches: object.etag },
-    });
-
-    if (!result) {
-      return c.json({ error: 'precondition_failed', path }, 409);
-    }
-
-    return c.json({
-      ok: true,
-      path,
-      etag: result.etag,
-      version: result.version,
-      size: result.size,
-      uploadedAt: result.uploaded.toISOString(),
-    });
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Invalid edit request' }, 400);
-  }
-});
-
 app.get('/api-info', (c) => {
-  return c.json({
-    ok: true,
-    service: 'edge',
-    message: 'Bruh edge worker with Agents.',
-  });
+  return c.json({ ok: true, service: 'edge', message: 'Bruh edge worker with Agents.' });
 });
 
 // --- Agent helpers ---
@@ -409,9 +241,7 @@ async function initSession(env: Env, sessionId: string, title?: string): Promise
 }
 
 async function registerThread(env: Env, session: SessionMetadata): Promise<void> {
-  if (session.sessionId === MAIN_SESSION_ID) {
-    return;
-  }
+  if (session.sessionId === MAIN_SESSION_ID) return;
 
   const registryStub = await getAgentByName(env.BRUH_AGENT, REGISTRY_AGENT_NAME);
   const response = await registryStub.fetch(new Request('https://agent/register-thread', {
@@ -432,24 +262,12 @@ async function registerThread(env: Env, session: SessionMetadata): Promise<void>
 export { BruhAgent };
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Handle Agents SDK routes (OAuth callbacks, WebSocket upgrades, etc.)
     const agentResponse = await routeAgentRequest(request, env);
-    if (agentResponse) {
-      return agentResponse;
-    }
+    if (agentResponse) return agentResponse;
 
-    // Try Hono API routes
     const honoResponse = await app.fetch(request, env, ctx);
+    if (honoResponse.status !== 404) return honoResponse;
 
-    // If Hono matched a route, return its response.
-    // If it returned 404, fall through to static assets.
-    if (honoResponse.status !== 404) {
-      return honoResponse;
-    }
-
-    // Let the static asset handler serve the request (SPA fallback).
-    // With run_worker_first + not_found_handling: single-page-application,
-    // returning a non-response here tells Cloudflare to check assets.
     return env.ASSETS ? env.ASSETS.fetch(request) : honoResponse;
   },
 };

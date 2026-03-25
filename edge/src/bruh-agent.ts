@@ -1,18 +1,23 @@
-import { Agent } from 'agents';
-import type { SessionEventEnvelope, SessionMetadata, SessionPromptRequest } from './session';
+import { AIChatAgent, type OnChatMessageOptions } from '@cloudflare/ai-chat';
+import { streamText, convertToModelMessages, stepCountIs, type StreamTextOnFinishCallback, type ToolSet, tool, jsonSchema } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import type { SessionEventEnvelope, SessionMetadata } from './session';
 
-interface McpServerConfig {
-  name: string;
-  url: string;
-  authEnvVar?: string;
-  transport?: 'auto' | 'sse' | 'streamable-http';
-  headers?: Record<string, string>;
+// Helper to create a tool with typed execute — works around AI SDK v6 overload issues
+function createTool<T>(config: {
+  description: string;
+  parameters: ReturnType<typeof jsonSchema>;
+  execute: (args: T) => Promise<string>;
+}) {
+  return tool({ ...config, inputSchema: config.parameters } as any);
 }
 
 interface BruhEnv {
   BRUH_AGENT: DurableObjectNamespace;
   MEMORY_BUCKET: R2Bucket;
-  RUNTIME_BASE_URL?: string;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   INTERNAL_API_SECRET?: string;
   MCP_SERVERS?: string;
   [key: string]: unknown;
@@ -27,8 +32,11 @@ interface BruhState {
   latestSeq: number;
 }
 
-const MAX_BUFFERED_EVENTS = 200;
-const encoder = new TextEncoder();
+const SYSTEM_PROMPT = `You are Bruh, a personal AI assistant. You are helpful, direct, and concise.
+
+You have access to tools for managing memory (persistent R2 storage) and other capabilities.
+Use memory tools to remember important information across conversations.
+Be proactive about saving useful context to memory when the user shares preferences or important information.`;
 
 function createSessionTitle(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -36,19 +44,7 @@ function createSessionTitle(text: string): string {
   return `${normalized.slice(0, 72).trimEnd()}…`;
 }
 
-function formatSse(event: SessionEventEnvelope): string {
-  return `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`;
-}
-
-interface SseClient {
-  id: string;
-  write: (chunk: string) => Promise<void>;
-  close: () => void;
-}
-
-export class BruhAgent extends Agent<BruhEnv, BruhState> {
-  private sseClients = new Map<string, SseClient>();
-
+export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   initialState: BruhState = {
     sessionId: '',
     status: 'idle',
@@ -60,58 +56,6 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
 
   async onStart(): Promise<void> {
     this.ensureSchema();
-    await this.connectConfiguredMcpServers();
-  }
-
-  private async connectConfiguredMcpServers(): Promise<void> {
-    const raw = this.env.MCP_SERVERS;
-    if (!raw || typeof raw !== 'string') return;
-
-    let configs: McpServerConfig[];
-    try {
-      configs = JSON.parse(raw);
-    } catch {
-      console.error('[BruhAgent] Failed to parse MCP_SERVERS config');
-      return;
-    }
-
-    if (!Array.isArray(configs)) return;
-
-    for (const config of configs) {
-      if (!config.name || !config.url) continue;
-
-      try {
-        const existingServers = this.getMcpServers();
-        const alreadyConnected = Object.values(existingServers.servers).some(
-          (s) => s.name === config.name && (s.state === 'ready' || s.state === 'discovering' || s.state === 'connected'),
-        );
-        if (alreadyConnected) continue;
-
-        const transportHeaders: Record<string, string> = { ...config.headers };
-        if (config.authEnvVar) {
-          const token = this.env[config.authEnvVar];
-          if (typeof token === 'string' && token.trim()) {
-            transportHeaders['Authorization'] = `Bearer ${token.trim()}`;
-          }
-        }
-
-        const options: Record<string, unknown> = {};
-        if (Object.keys(transportHeaders).length > 0 || config.transport) {
-          options.transport = {
-            ...(Object.keys(transportHeaders).length > 0 ? { headers: transportHeaders } : {}),
-            ...(config.transport ? { type: config.transport } : {}),
-          };
-        }
-
-        await this.addMcpServer(config.name, config.url, options);
-        console.log(`[BruhAgent] Connected to configured MCP server: ${config.name}`);
-      } catch (error) {
-        console.error(
-          `[BruhAgent] Failed to connect to configured MCP server ${config.name}:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-    }
   }
 
   private ensureSchema(): void {
@@ -132,9 +76,209 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     `;
   }
 
+  // --- Model provider selection ---
+
+  private getModel() {
+    const anthropicKey = this.env.ANTHROPIC_API_KEY?.trim();
+    const openaiKey = this.env.OPENAI_API_KEY?.trim();
+
+    if (anthropicKey) {
+      const anthropic = createAnthropic({ apiKey: anthropicKey });
+      return anthropic('claude-sonnet-4-20250514');
+    }
+
+    if (openaiKey) {
+      const openai = createOpenAI({ apiKey: openaiKey });
+      return openai('gpt-4o');
+    }
+
+    throw new Error('No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
+  }
+
+  // --- Tools ---
+
+  private getTools(): ToolSet {
+    const env = this.env;
+    const agent = this;
+
+    return {
+      memory_read: createTool<{ path: string }>({
+        description: 'Read a file from persistent memory (R2 storage). Use paths like "profile.md", "preferences.md", etc.',
+        parameters: jsonSchema<{ path: string }>({
+          type: 'object',
+          properties: { path: { type: 'string', description: 'Path relative to memory root, e.g. "profile.md"' } },
+          required: ['path'],
+        }),
+        execute: async ({ path }) => {
+          const normalized = path.replace(/^\/+/, '').replace(/^memory\//, '');
+          const object = await env.MEMORY_BUCKET.get(`memory/${normalized}`);
+          if (!object) return `File not found: ${normalized}`;
+          return await object.text();
+        },
+      }),
+
+      memory_write: createTool<{ path: string; content: string }>({
+        description: 'Write or overwrite a file in persistent memory. Use for saving preferences, notes, session summaries, etc.',
+        parameters: jsonSchema<{ path: string; content: string }>({
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path relative to memory root' },
+            content: { type: 'string', description: 'Content to write' },
+          },
+          required: ['path', 'content'],
+        }),
+        execute: async ({ path, content }) => {
+          const normalized = path.replace(/^\/+/, '').replace(/^memory\//, '');
+          await env.MEMORY_BUCKET.put(`memory/${normalized}`, content, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+          return `Written: ${normalized} (${content.length} bytes)`;
+        },
+      }),
+
+      memory_list: createTool<{ prefix?: string }>({
+        description: 'List files in persistent memory. Returns file names and sizes.',
+        parameters: jsonSchema<{ prefix?: string }>({
+          type: 'object',
+          properties: { prefix: { type: 'string', description: 'Optional prefix to filter by, e.g. "sessions/"' } },
+        }),
+        execute: async ({ prefix }) => {
+          const fullPrefix = prefix
+            ? `memory/${prefix.replace(/^\/+/, '').replace(/^memory\//, '')}`
+            : 'memory/';
+          const result = await env.MEMORY_BUCKET.list({ prefix: fullPrefix, limit: 100 });
+          if (result.objects.length === 0) return 'No files found.';
+          return result.objects
+            .map((o) => `${o.key.replace(/^memory\//, '')} (${o.size} bytes)`)
+            .join('\n');
+        },
+      }),
+
+      schedule_set: createTool<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
+        description: 'Schedule a task or reminder for later. The agent will be prompted with the message at the scheduled time.',
+        parameters: jsonSchema<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Message to be delivered at the scheduled time' },
+            delaySeconds: { type: 'number', description: 'Delay in seconds from now' },
+            scheduledAt: { type: 'string', description: 'ISO 8601 datetime to fire at' },
+            taskType: { type: 'string', enum: ['task', 'reminder'], description: 'Type: "task" auto-prompts, "reminder" just notifies' },
+          },
+          required: ['message'],
+        }),
+        execute: async ({ message, delaySeconds, scheduledAt, taskType }) => {
+          const when = scheduledAt
+            ? new Date(scheduledAt)
+            : delaySeconds && delaySeconds > 0
+              ? delaySeconds
+              : null;
+
+          if (!when) return 'Error: delaySeconds or scheduledAt is required';
+
+          const payload = JSON.stringify({ message, taskType: taskType || 'task' });
+          const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
+          return `Scheduled "${message}" (${schedule.type}, id: ${schedule.id})`;
+        },
+      }),
+
+      schedule_list: createTool<Record<string, never>>({
+        description: 'List all active scheduled tasks and reminders.',
+        parameters: jsonSchema<Record<string, never>>({ type: 'object', properties: {} }),
+        execute: async () => {
+          const schedules = agent.getSchedules();
+          if (schedules.length === 0) return 'No active schedules.';
+          return schedules
+            .map((s) => {
+              const time = s.time ? new Date(s.time).toISOString() : 'recurring';
+              return `${s.id}: ${s.callback} at ${time}`;
+            })
+            .join('\n');
+        },
+      }),
+
+      schedule_cancel: createTool<{ scheduleId: string }>({
+        description: 'Cancel a scheduled task by its ID.',
+        parameters: jsonSchema<{ scheduleId: string }>({
+          type: 'object',
+          properties: { scheduleId: { type: 'string', description: 'ID of the schedule to cancel' } },
+          required: ['scheduleId'],
+        }),
+        execute: async ({ scheduleId }) => {
+          const cancelled = await agent.cancelSchedule(scheduleId);
+          return cancelled ? `Cancelled schedule ${scheduleId}` : `Schedule ${scheduleId} not found`;
+        },
+      }),
+    };
+  }
+
+  // --- AIChatAgent: the agent loop ---
+
+  async onChatMessage(
+    onFinish: StreamTextOnFinishCallback<ToolSet>,
+    options?: OnChatMessageOptions,
+  ): Promise<Response | undefined> {
+    const model = this.getModel();
+    const tools = this.getTools();
+
+    // Set title from first user message
+    const lastUserMessage = [...this.messages].reverse().find((m) => m.role === 'user');
+    if (lastUserMessage && !this.state.title) {
+      const textPart = lastUserMessage.parts?.find((p) => p.type === 'text');
+      if (textPart && 'text' in textPart) {
+        this.setState({
+          ...this.state,
+          title: createSessionTitle(textPart.text),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    const modelMessages = await convertToModelMessages(this.messages);
+
+    const result = streamText({
+      model,
+      messages: modelMessages,
+      system: SYSTEM_PROMPT,
+      tools,
+      stopWhen: stepCountIs(10),
+      onFinish,
+      abortSignal: options?.abortSignal,
+    });
+
+    return result.toUIMessageStreamResponse();
+  }
+
+  // --- Scheduled task execution ---
+
+  async executeScheduledTask(rawPayload: string): Promise<void> {
+    let message: string;
+    let taskType: 'task' | 'reminder';
+
+    try {
+      const parsed = JSON.parse(rawPayload) as { message?: string; taskType?: string };
+      message = parsed.message || rawPayload;
+      taskType = parsed.taskType === 'reminder' ? 'reminder' : 'task';
+    } catch {
+      message = rawPayload;
+      taskType = 'task';
+    }
+
+    await this.appendEvent('schedule.fired', {
+      message,
+      taskType,
+      firedAt: new Date().toISOString(),
+    });
+
+    // For tasks, we could auto-prompt the agent by sending a message
+    // For now, just log the event
+  }
+
+  // --- Custom request handling (session init, events, threads, etc.) ---
+
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+    // Let AIChatAgent handle its own routes first
     switch (`${request.method} ${url.pathname}`) {
       case 'POST /init':
         return this.handleInit(request);
@@ -145,38 +289,77 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       case 'GET /stream':
         return this.handleStream(request);
       case 'POST /prompt':
-        return this.handlePrompt(request);
-      case 'POST /steer':
-        return this.handleQueuedCommand(request, 'steer');
-      case 'POST /follow-up':
-        return this.handleQueuedCommand(request, 'follow-up');
-      case 'POST /abort':
-        return this.handleAbort();
-      case 'POST /events':
-        return this.handleIncomingEvent(request);
+        return this.handleHttpPrompt(request);
       case 'POST /register-thread':
         return this.handleRegisterThread(request);
       case 'GET /threads':
         return this.handleListThreads();
-      case 'POST /schedule':
-        return this.handleSchedule(request);
-      case 'GET /schedules':
-        return this.handleListSchedules();
-      case 'POST /cancel-schedule':
-        return this.handleCancelSchedule(request);
-      case 'POST /mcp/connect':
-        return this.handleMcpConnect(request);
-      case 'POST /mcp/disconnect':
-        return this.handleMcpDisconnect(request);
-      case 'GET /mcp/servers':
-        return this.handleMcpListServers();
-      case 'GET /mcp/tools':
-        return this.handleMcpListTools();
-      case 'POST /mcp/call':
-        return this.handleMcpCallTool(request);
       default:
-        return new Response('Not found', { status: 404 });
+        // Fall through to AIChatAgent's built-in handling (WebSocket, chat protocol)
+        return super.onRequest(request);
     }
+  }
+
+  // --- HTTP prompt bridge (for current web app that uses POST, not WebSocket) ---
+
+  private async handleHttpPrompt(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { text?: string };
+    const text = body.text?.trim();
+    if (!text) {
+      return Response.json({ error: 'text is required' }, { status: 400 });
+    }
+
+    // Set title from first prompt
+    if (!this.state.title) {
+      this.setState({
+        ...this.state,
+        title: createSessionTitle(text),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    // Add user message to conversation
+    const userMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      content: text,
+      parts: [{ type: 'text' as const, text }],
+      createdAt: new Date(),
+    };
+    this.messages.push(userMessage);
+
+    // Emit event for the legacy SSE stream
+    await this.appendEvent('session.prompt.accepted', { text });
+
+    // Run the model directly (bypass AIChatAgent's WebSocket-based onChatMessage)
+    const model = this.getModel();
+    const tools = this.getTools();
+    const modelMessages = await convertToModelMessages(this.messages);
+
+    const result = streamText({
+      model,
+      messages: modelMessages,
+      system: SYSTEM_PROMPT,
+      tools,
+      stopWhen: stepCountIs(10),
+      onFinish: async (event) => {
+        // Save the assistant message
+        const assistantMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: event.text || '',
+          parts: [{ type: 'text' as const, text: event.text || '' }],
+          createdAt: new Date(),
+        };
+        this.messages.push(assistantMessage);
+        await this.saveMessages(this.messages);
+
+        // Emit events for legacy SSE stream
+        await this.appendEvent('assistant.message.complete', { text: event.text || '' });
+      },
+    });
+
+    return result.toUIMessageStreamResponse();
   }
 
   // --- Session / thread init ---
@@ -207,11 +390,6 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       });
     }
 
-    const eventCount = this.sql<{ count: number }>`SELECT COUNT(*) as count FROM events`[0]?.count ?? 0;
-    if (eventCount === 0) {
-      await this.appendEvent('session.created', { message: 'Session created' });
-    }
-
     return Response.json(this.toMetadata());
   }
 
@@ -219,7 +397,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     return Response.json(this.toMetadata());
   }
 
-  // --- Thread registry (replaces SessionIndexDO) ---
+  // --- Thread registry ---
 
   private async handleRegisterThread(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => ({}))) as {
@@ -253,280 +431,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     return Response.json({ sessions });
   }
 
-  // --- Scheduling ---
-
-  private async handleSchedule(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as {
-      message?: string;
-      delaySeconds?: number;
-      scheduledAt?: string;
-      taskType?: 'task' | 'reminder';
-    };
-
-    const message = body.message?.trim();
-    if (!message) {
-      return Response.json({ error: 'message is required' }, { status: 400 });
-    }
-
-    const when = body.scheduledAt
-      ? new Date(body.scheduledAt)
-      : body.delaySeconds && body.delaySeconds > 0
-        ? body.delaySeconds
-        : null;
-
-    if (!when) {
-      return Response.json(
-        { error: 'delaySeconds or scheduledAt is required' },
-        { status: 400 },
-      );
-    }
-
-    const taskType = body.taskType || 'task';
-    const payload = JSON.stringify({ message, taskType });
-    const schedule = await this.schedule(when, 'executeScheduledTask', payload);
-
-    return Response.json({
-      ok: true,
-      scheduleId: schedule.id,
-      message,
-      taskType,
-      type: schedule.type,
-    });
-  }
-
-  private handleListSchedules(): Response {
-    const schedules = this.getSchedules().map((s) => ({
-      id: s.id,
-      type: s.type,
-      callback: s.callback,
-      payload: s.payload,
-      scheduledAt: s.time ? new Date(s.time).toISOString() : undefined,
-    }));
-    return Response.json({ schedules });
-  }
-
-  private async handleCancelSchedule(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as { scheduleId?: string };
-    const scheduleId = body.scheduleId?.trim();
-    if (!scheduleId) {
-      return Response.json({ error: 'scheduleId is required' }, { status: 400 });
-    }
-
-    const cancelled = await this.cancelSchedule(scheduleId);
-    return Response.json({ ok: true, cancelled });
-  }
-
-  async executeScheduledTask(rawPayload: string): Promise<void> {
-    let message: string;
-    let taskType: 'task' | 'reminder';
-
-    try {
-      const parsed = JSON.parse(rawPayload) as { message?: string; taskType?: string };
-      message = parsed.message || rawPayload;
-      taskType = parsed.taskType === 'reminder' ? 'reminder' : 'task';
-    } catch {
-      message = rawPayload;
-      taskType = 'task';
-    }
-
-    await this.appendEvent('schedule.fired', {
-      message,
-      taskType,
-      firedAt: new Date().toISOString(),
-    });
-
-    if (taskType === 'task') {
-      await this.forwardTextCommandToRuntime(this.state.sessionId, 'prompt', message);
-    }
-  }
-
-  // --- MCP client ---
-
-  private async handleMcpConnect(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as {
-      name?: string;
-      url?: string;
-      callbackHost?: string;
-      transport?: { type?: string; headers?: Record<string, string> };
-    };
-
-    const name = body.name?.trim();
-    const url = body.url?.trim();
-    if (!name || !url) {
-      return Response.json({ error: 'name and url are required' }, { status: 400 });
-    }
-
-    try {
-      const connectPromise = this.addMcpServer(name, url, {
-        callbackHost: body.callbackHost,
-        transport: body.transport as Record<string, unknown> | undefined,
-      });
-
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('MCP connection timed out after 30s')), 30_000),
-      );
-
-      const result = await Promise.race([connectPromise, timeoutPromise]);
-      return Response.json({ ok: true, ...result });
-    } catch (error) {
-      return Response.json(
-        { error: error instanceof Error ? error.message : 'Failed to connect' },
-        { status: 500 },
-      );
-    }
-  }
-
-  private async handleMcpDisconnect(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as { name?: string };
-    const name = body.name?.trim();
-    if (!name) {
-      return Response.json({ error: 'name is required' }, { status: 400 });
-    }
-
-    try {
-      await this.removeMcpServer(name);
-      return Response.json({ ok: true, name });
-    } catch (error) {
-      return Response.json(
-        { error: error instanceof Error ? error.message : 'Failed to disconnect' },
-        { status: 500 },
-      );
-    }
-  }
-
-  private handleMcpListServers(): Response {
-    const state = this.getMcpServers();
-    const servers = Object.entries(state.servers).map(([id, server]) => ({
-      id,
-      name: server.name,
-      state: server.state,
-      url: server.server_url,
-    }));
-    return Response.json({ servers });
-  }
-
-  private handleMcpListTools(): Response {
-    const state = this.getMcpServers();
-    const tools = (state.tools ?? []).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      serverId: tool.serverId,
-      inputSchema: tool.inputSchema,
-    }));
-    return Response.json({ tools });
-  }
-
-  private async handleMcpCallTool(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as {
-      serverId?: string;
-      name?: string;
-      arguments?: Record<string, unknown>;
-    };
-
-    const serverId = body.serverId?.trim();
-    const name = body.name?.trim();
-    if (!serverId || !name) {
-      return Response.json({ error: 'serverId and name are required' }, { status: 400 });
-    }
-
-    try {
-      const result = await this.mcp.callTool({
-        serverId,
-        name,
-        arguments: body.arguments ?? {},
-      });
-      return Response.json({ ok: true, result });
-    } catch (error) {
-      return Response.json(
-        { error: error instanceof Error ? error.message : 'Tool call failed' },
-        { status: 500 },
-      );
-    }
-  }
-
-  // --- Prompt / steer / follow-up / abort ---
-
-  private async handlePrompt(request: Request): Promise<Response> {
-    const body = (await request.json()) as SessionPromptRequest;
-    const text = body.text?.trim();
-    if (!text) {
-      return Response.json({ error: 'text is required' }, { status: 400 });
-    }
-
-    this.maybeSetTitleFromText(text);
-    await this.appendEvent('session.prompt.accepted', {
-      text,
-      message: 'Prompt accepted and queued for runtime processing',
-    });
-
-    this.ctx.waitUntil(this.forwardTextCommandToRuntime(this.state.sessionId, 'prompt', text));
-    return Response.json({ ok: true, sessionId: this.state.sessionId, queued: true });
-  }
-
-  private async handleQueuedCommand(
-    request: Request,
-    kind: 'steer' | 'follow-up',
-  ): Promise<Response> {
-    const body = (await request.json()) as SessionPromptRequest;
-    const text = body.text?.trim();
-    if (!text) {
-      return Response.json({ error: 'text is required' }, { status: 400 });
-    }
-
-    const result = await this.forwardTextCommandToRuntime(this.state.sessionId, kind, text);
-    if (!result.ok) {
-      return Response.json(
-        { error: 'failed_to_queue', details: result.details },
-        { status: result.status ?? 409 },
-      );
-    }
-
-    const eventType =
-      kind === 'steer' ? 'session.steer.accepted' : 'session.follow_up.accepted';
-    await this.appendEvent(eventType, {
-      text,
-      message:
-        kind === 'steer'
-          ? 'Steering instruction accepted and queued'
-          : 'Follow-up instruction accepted and queued',
-    });
-
-    return Response.json({ ok: true, sessionId: this.state.sessionId, queued: true });
-  }
-
-  private async handleAbort(): Promise<Response> {
-    this.ctx.waitUntil(this.forwardAbortToRuntime(this.state.sessionId));
-    return Response.json({ ok: true, sessionId: this.state.sessionId, requested: true });
-  }
-
-  // --- Incoming events from runtime ---
-
-  private async handleIncomingEvent(request: Request): Promise<Response> {
-    const body = (await request.json()) as {
-      type: string;
-      timestamp?: string;
-      payload?: Record<string, unknown>;
-    };
-    if (!body.type) {
-      return Response.json({ error: 'type is required' }, { status: 400 });
-    }
-
-    if (body.type === 'session.status' && typeof body.payload?.status === 'string') {
-      this.setSessionStatus(body.payload.status as 'idle' | 'active');
-    }
-
-    if (
-      (body.type === 'session.prompt.accepted' || body.type === 'runtime.prompt.start') &&
-      typeof body.payload?.text === 'string'
-    ) {
-      this.maybeSetTitleFromText(body.payload.text);
-    }
-
-    const event = await this.appendEvent(body.type, body.payload ?? {}, body.timestamp);
-    return Response.json({ ok: true, seq: event.seq });
-  }
-
-  // --- Event buffering and SSE ---
+  // --- Legacy event system (for compatibility with current web app) ---
 
   private async handleGetEvents(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -543,42 +448,35 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
 
     const stream = new TransformStream<Uint8Array, Uint8Array>();
     const writer = stream.writable.getWriter();
-    const clientId = crypto.randomUUID();
+    const encoder = new TextEncoder();
     let closed = false;
-    let pending = Promise.resolve();
 
-    const client: SseClient = {
-      id: clientId,
-      write: async (chunk: string) => {
-        if (closed) return;
-        pending = pending
-          .then(() => writer.write(encoder.encode(chunk)))
-          .catch(() => {
-            closed = true;
-            this.sseClients.delete(clientId);
-          });
-        await pending;
-      },
-      close: () => {
-        if (closed) return;
+    const replay = this.getEventsAfter(afterSeq);
+    const write = async (chunk: string) => {
+      if (closed) return;
+      try {
+        await writer.write(encoder.encode(chunk));
+      } catch {
         closed = true;
-        this.sseClients.delete(clientId);
-        void writer.close().catch(() => undefined);
-      },
+      }
     };
-
-    this.sseClients.set(clientId, client);
-    request.signal.addEventListener('abort', () => client.close(), { once: true });
 
     this.ctx.waitUntil(
       (async () => {
-        const replay = this.getEventsAfter(afterSeq);
-        await client.write(`: connected to ${this.state.sessionId}\n\n`);
+        await write(`: connected to ${this.state.sessionId}\n\n`);
         for (const event of replay) {
-          await client.write(formatSse(event));
+          await write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
         }
-      })().catch(() => client.close()),
+        // Keep connection open — events will be pushed via appendEvent
+      })().catch(() => {
+        closed = true;
+      }),
     );
+
+    request.signal.addEventListener('abort', () => {
+      closed = true;
+      void writer.close().catch(() => undefined);
+    }, { once: true });
 
     return new Response(stream.readable, {
       headers: {
@@ -602,25 +500,6 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     };
   }
 
-  private setSessionStatus(status: 'idle' | 'active'): void {
-    this.setState({
-      ...this.state,
-      status,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  private maybeSetTitleFromText(text: string): void {
-    if (this.state.title) return;
-    const title = createSessionTitle(text);
-    if (!title) return;
-    this.setState({
-      ...this.state,
-      title,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
   private getEventsAfter(afterSeq: number): SessionEventEnvelope[] {
     return this.sql<{
       seq: number;
@@ -633,7 +512,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       FROM events
       WHERE seq > ${afterSeq}
       ORDER BY seq ASC
-      LIMIT ${MAX_BUFFERED_EVENTS}
+      LIMIT 200
     `.map((row) => ({
       sessionId: row.session_id,
       seq: row.seq,
@@ -657,12 +536,11 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       updatedAt: now,
     });
 
-    const eventTimestamp = timestamp || now;
     const event: SessionEventEnvelope = {
       sessionId: this.state.sessionId,
       seq: nextSeq,
       type,
-      timestamp: eventTimestamp,
+      timestamp: timestamp || now,
       payload,
     };
 
@@ -672,93 +550,8 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     `;
 
     // Prune old events
-    this.sql`
-      DELETE FROM events WHERE seq <= ${nextSeq - MAX_BUFFERED_EVENTS}
-    `;
+    this.sql`DELETE FROM events WHERE seq <= ${nextSeq - 200}`;
 
-    await this.broadcastSse(event);
     return event;
-  }
-
-  private async broadcastSse(event: SessionEventEnvelope): Promise<void> {
-    const clients = [...this.sseClients.values()];
-    await Promise.allSettled(clients.map((client) => client.write(formatSse(event))));
-  }
-
-  // --- Runtime forwarding ---
-
-  private async forwardTextCommandToRuntime(
-    sessionId: string,
-    action: 'prompt' | 'steer' | 'follow-up',
-    text: string,
-  ): Promise<{ ok: boolean; status?: number; details?: string }> {
-    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://localhost:8788').replace(
-      /\/+$/,
-      '',
-    );
-
-    try {
-      const response = await fetch(
-        `${runtimeBaseUrl}/internal/sessions/${sessionId}/${action}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        },
-      );
-
-      if (!response.ok) {
-        const details = await response.text().catch(() => '');
-        if (action === 'prompt') {
-          this.setSessionStatus('idle');
-        }
-        await this.appendEvent('runtime.forward.error', {
-          action,
-          status: response.status,
-          details,
-        });
-        return { ok: false, status: response.status, details };
-      }
-
-      return { ok: true };
-    } catch (error) {
-      const details = error instanceof Error ? error.message : 'Failed to reach runtime';
-      if (action === 'prompt') {
-        this.setSessionStatus('idle');
-      }
-      await this.appendEvent('runtime.forward.error', {
-        action,
-        message: details,
-      });
-      return { ok: false, details };
-    }
-  }
-
-  private async forwardAbortToRuntime(sessionId: string): Promise<void> {
-    const runtimeBaseUrl = (this.env.RUNTIME_BASE_URL || 'http://localhost:8788').replace(
-      /\/+$/,
-      '',
-    );
-
-    try {
-      const response = await fetch(
-        `${runtimeBaseUrl}/internal/sessions/${sessionId}/abort`,
-        { method: 'POST' },
-      );
-
-      if (!response.ok) {
-        const details = await response.text().catch(() => '');
-        await this.appendEvent('runtime.forward.error', {
-          action: 'abort',
-          status: response.status,
-          details,
-        });
-      }
-    } catch (error) {
-      await this.appendEvent('runtime.forward.error', {
-        action: 'abort',
-        message: error instanceof Error ? error.message : 'Failed to reach runtime',
-      });
-    }
   }
 }

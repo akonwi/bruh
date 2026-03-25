@@ -32,6 +32,7 @@ export interface Env {
   BRUH_AGENT: DurableObjectNamespace<BruhAgent>;
   MEMORY_BUCKET: R2Bucket;
   ASSETS?: Fetcher;
-  RUNTIME_BASE_URL?: string;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   INTERNAL_API_SECRET?: string;
 }
