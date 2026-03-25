@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useAgent } from 'agents/react'
 import { useAgentChat } from '@cloudflare/ai-chat/react'
 import type { UIMessage } from 'ai'
@@ -25,6 +25,8 @@ import {
   createSession,
   getMainSession,
   listSessions,
+  steerSession,
+  followUpSession,
   type SessionState,
 } from '@/lib/api'
 
@@ -97,6 +99,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
   const agent = useAgent({ agent: 'BruhAgent', name: sessionId })
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
   const [input, setInput] = useState('')
+  const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
   const isLoading = status === 'streaming' || status === 'submitted'
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -116,12 +119,28 @@ function ChatView({ sessionId }: { sessionId: string }) {
     scrollToBottom()
   }, [sessionId, scrollToBottom])
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const text = input.trim()
-    if (!text || isLoading) return
-    sendMessage({ role: 'user', content: text, parts: [{ type: 'text', text }] })
+    if (!text) return
+
+    if (isLoading) {
+      // While streaming, use steer or follow-up
+      try {
+        if (queueMode === 'steer') {
+          await steerSession(sessionId, text)
+        } else {
+          await followUpSession(sessionId, text)
+        }
+        setInput('')
+      } catch (e) {
+        console.error('Failed to send:', e)
+      }
+      return
+    }
+
+    sendMessage({ role: 'user', parts: [{ type: 'text', text }] })
     setInput('')
-  }, [input, isLoading, sendMessage])
+  }, [input, isLoading, queueMode, sessionId, sendMessage])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
@@ -187,19 +206,40 @@ function ChatView({ sessionId }: { sessionId: string }) {
             />
             <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
               <div className='min-w-0 text-xs text-muted-foreground'>
-                {isLoading ? <span>Bruh is responding…</span> : null}
+                {isLoading ? (
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span>Bruh is responding…</span>
+                    <div className='flex items-center gap-1'>
+                      <Button
+                        size='xs'
+                        variant={queueMode === 'steer' ? 'secondary' : 'outline'}
+                        onClick={() => setQueueMode('steer')}
+                      >
+                        Steer
+                      </Button>
+                      <Button
+                        size='xs'
+                        variant={queueMode === 'follow-up' ? 'secondary' : 'outline'}
+                        onClick={() => setQueueMode('follow-up')}
+                      >
+                        Follow-up
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              {isLoading ? (
-                <Button variant='outline' onClick={stop}>
-                  <StopCircle data-icon='inline-start' />
-                  Stop
-                </Button>
-              ) : (
+              <div className='flex items-center gap-2'>
+                {isLoading ? (
+                  <Button variant='outline' onClick={() => stop()}>
+                    <StopCircle data-icon='inline-start' />
+                    Stop
+                  </Button>
+                ) : null}
                 <Button onClick={handleSend} disabled={!input.trim()}>
                   <ArrowSquareOut data-icon='inline-start' />
-                  Send
+                  {isLoading ? (queueMode === 'steer' ? 'Steer' : 'Follow-up') : 'Send'}
                 </Button>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -215,7 +255,7 @@ function MessageItem({ message }: { message: UIMessage }) {
 
   return (
     <>
-      {message.parts?.map((part, i) => {
+      {message.parts?.map((part: UIMessage['parts'][number], i: number) => {
         if (part.type === 'text' && part.text.trim()) {
           const bubbleClasses = isUser
             ? 'bg-primary text-primary-foreground'
@@ -226,15 +266,15 @@ function MessageItem({ message }: { message: UIMessage }) {
               <div className={cn('max-w-[88%] px-3 py-2 sm:max-w-[78%]', bubbleClasses)}>
                 <MessageMarkdown content={part.text} tone={isUser ? 'user' : 'assistant'} />
                 <p className={cn('mt-1 text-[11px]', isUser ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
-                  {formatMessageTime(message.createdAt)}
+                  {formatMessageTime((message as any).createdAt)}
                 </p>
               </div>
             </div>
           )
         }
 
-        if (part.type === 'tool-invocation') {
-          return <ToolPart key={i} part={part} />
+        if (part.type && part.type.startsWith('tool-')) {
+          return <ToolPart key={i} part={part as any} />
         }
 
         return null
@@ -243,7 +283,7 @@ function MessageItem({ message }: { message: UIMessage }) {
   )
 }
 
-function ToolPart({ part }: { part: Extract<UIMessage['parts'][number], { type: 'tool-invocation' }> }) {
+function ToolPart({ part }: { part: any }) {
   const isRunning = part.state === 'call' || part.state === 'partial-call'
   const isError = part.state === 'result' && typeof part.result === 'string' && part.result.startsWith('Error:')
   const isDone = part.state === 'result'

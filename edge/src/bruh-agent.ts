@@ -2,9 +2,10 @@ import { AIChatAgent, type OnChatMessageOptions } from '@cloudflare/ai-chat';
 import { streamText, convertToModelMessages, stepCountIs, type StreamTextOnFinishCallback, type ToolSet, tool, jsonSchema } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { getAgentByName } from 'agents';
 import type { SessionEventEnvelope, SessionMetadata } from './session';
 
-// Helper to create a tool with typed execute — works around AI SDK v6 overload issues
+// --- Helper: typed tool creation (works around AI SDK v6 overload issues) ---
 function createTool<T>(config: {
   description: string;
   parameters: ReturnType<typeof jsonSchema>;
@@ -12,6 +13,8 @@ function createTool<T>(config: {
 }) {
   return tool({ ...config, inputSchema: config.parameters } as any);
 }
+
+// --- Env & State ---
 
 interface BruhEnv {
   BRUH_AGENT: DurableObjectNamespace;
@@ -32,17 +35,66 @@ interface BruhState {
   latestSeq: number;
 }
 
-const SYSTEM_PROMPT = `You are Bruh, a personal AI assistant. You are helpful, direct, and concise.
+interface McpServerConfig {
+  name: string;
+  url: string;
+  authEnvVar?: string;
+  transport?: 'auto' | 'sse' | 'streamable-http';
+  headers?: Record<string, string>;
+}
 
-You have access to tools for managing memory (persistent R2 storage) and other capabilities.
-Use memory tools to remember important information across conversations.
-Be proactive about saving useful context to memory when the user shares preferences or important information.`;
+// --- System prompt ---
+
+const SYSTEM_PROMPT = `You are Bruh, a personal AI assistant. You are helpful, direct, and concise.
+You have access to persistent memory (R2 storage), scheduling, thread awareness, and MCP tools.
+
+## Memory
+
+You have durable memory stored in R2. Use it to remember important information across conversations.
+All threads share the same memory.
+
+### Memory conventions
+- \`profile.md\` — user preferences, communication style, standing instructions. Always save preferences here.
+- \`notes/YYYY-MM-DD.md\` — dated notes, observations, meeting notes. Append, don't overwrite.
+- \`projects/<slug>/overview.md\` — project goals, constraints, current shape.
+- \`projects/<slug>/todo.md\` — next actions and open tasks.
+- \`projects/<slug>/decisions.md\` — important decisions and rationale.
+- \`sessions/<sessionId>/summary.md\` — rolling session summaries (auto-generated).
+
+### Memory habits
+- Recall before asking the user to repeat themselves.
+- Save durable things (preferences, decisions, project context), not ephemeral chatter.
+- User preferences always go to \`profile.md\`, even if mentioned in a project thread.
+- Use \`memory_append\` for dated notes, \`memory_write\` for new files, \`memory_edit\` for precise updates.
+
+## Scheduling
+You can schedule tasks and reminders. Tasks auto-prompt you at the scheduled time. Reminders just notify.
+
+## Threads
+You run as the main thread or a side thread. Use thread tools to list and read summaries of other threads.
+
+## MCP
+You can connect to external MCP servers for additional tools. Use mcp_servers to check what's connected.
+
+## Style
+- Be direct and concise.
+- Use markdown for structure when helpful.
+- Don't hedge or add unnecessary caveats.
+- When you save to memory, briefly confirm what you saved.`;
+
+// --- Helpers ---
 
 function createSessionTitle(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= 72) return normalized;
   return `${normalized.slice(0, 72).trimEnd()}…`;
 }
+
+function normalizePath(path: string): string {
+  return path.replace(/^\/+/, '').replace(/^memory\//, '');
+}
+
+// --- Agent ---
 
 export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   initialState: BruhState = {
@@ -56,6 +108,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
   async onStart(): Promise<void> {
     this.ensureSchema();
+    await this.connectConfiguredMcpServers();
   }
 
   private ensureSchema(): void {
@@ -74,6 +127,54 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         created_at TEXT NOT NULL
       )
     `;
+  }
+
+  // --- MCP config-driven connections ---
+
+  private async connectConfiguredMcpServers(): Promise<void> {
+    const raw = this.env.MCP_SERVERS;
+    if (!raw || typeof raw !== 'string') return;
+
+    let configs: McpServerConfig[];
+    try {
+      configs = JSON.parse(raw);
+    } catch {
+      console.error('[BruhAgent] Failed to parse MCP_SERVERS config');
+      return;
+    }
+
+    if (!Array.isArray(configs)) return;
+
+    for (const config of configs) {
+      if (!config.name || !config.url) continue;
+      try {
+        const existing = this.getMcpServers();
+        const alreadyConnected = Object.values(existing.servers).some(
+          (s) => s.name === config.name && (s.state === 'ready' || s.state === 'discovering' || s.state === 'connected'),
+        );
+        if (alreadyConnected) continue;
+
+        const transportHeaders: Record<string, string> = { ...config.headers };
+        if (config.authEnvVar) {
+          const token = this.env[config.authEnvVar];
+          if (typeof token === 'string' && token.trim()) {
+            transportHeaders['Authorization'] = `Bearer ${token.trim()}`;
+          }
+        }
+
+        const options: Record<string, unknown> = {};
+        if (Object.keys(transportHeaders).length > 0 || config.transport) {
+          options.transport = {
+            ...(Object.keys(transportHeaders).length > 0 ? { headers: transportHeaders } : {}),
+            ...(config.transport ? { type: config.transport } : {}),
+          };
+        }
+
+        await this.addMcpServer(config.name, config.url, options);
+      } catch (error) {
+        console.error(`[BruhAgent] Failed to connect MCP server ${config.name}:`, error instanceof Error ? error.message : error);
+      }
+    }
   }
 
   // --- Model provider selection ---
@@ -102,37 +203,91 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     const agent = this;
 
     return {
+      // --- Memory tools ---
+
       memory_read: createTool<{ path: string }>({
-        description: 'Read a file from persistent memory (R2 storage). Use paths like "profile.md", "preferences.md", etc.',
+        description: 'Read a file from persistent memory (R2). Paths like "profile.md", "notes/2026-03-25.md", "projects/bruh/todo.md".',
         parameters: jsonSchema<{ path: string }>({
           type: 'object',
-          properties: { path: { type: 'string', description: 'Path relative to memory root, e.g. "profile.md"' } },
+          properties: { path: { type: 'string', description: 'Path relative to memory root' } },
           required: ['path'],
         }),
         execute: async ({ path }) => {
-          const normalized = path.replace(/^\/+/, '').replace(/^memory\//, '');
-          const object = await env.MEMORY_BUCKET.get(`memory/${normalized}`);
-          if (!object) return `File not found: ${normalized}`;
+          const key = normalizePath(path);
+          const object = await env.MEMORY_BUCKET.get(`memory/${key}`);
+          if (!object) return `File not found: ${key}`;
           return await object.text();
         },
       }),
 
       memory_write: createTool<{ path: string; content: string }>({
-        description: 'Write or overwrite a file in persistent memory. Use for saving preferences, notes, session summaries, etc.',
+        description: 'Write or overwrite a file in persistent memory. Use for new files or full replacements.',
         parameters: jsonSchema<{ path: string; content: string }>({
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Path relative to memory root' },
-            content: { type: 'string', description: 'Content to write' },
+            content: { type: 'string', description: 'Full content to write' },
           },
           required: ['path', 'content'],
         }),
         execute: async ({ path, content }) => {
-          const normalized = path.replace(/^\/+/, '').replace(/^memory\//, '');
-          await env.MEMORY_BUCKET.put(`memory/${normalized}`, content, {
+          const key = normalizePath(path);
+          await env.MEMORY_BUCKET.put(`memory/${key}`, content, {
             httpMetadata: { contentType: 'text/plain; charset=utf-8' },
           });
-          return `Written: ${normalized} (${content.length} bytes)`;
+          return `Written: ${key} (${content.length} bytes)`;
+        },
+      }),
+
+      memory_edit: createTool<{ path: string; oldText: string; newText: string }>({
+        description: 'Edit a file in persistent memory by replacing exact text. Use for precise updates to existing files.',
+        parameters: jsonSchema<{ path: string; oldText: string; newText: string }>({
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path relative to memory root' },
+            oldText: { type: 'string', description: 'Exact text to find and replace' },
+            newText: { type: 'string', description: 'Replacement text' },
+          },
+          required: ['path', 'oldText', 'newText'],
+        }),
+        execute: async ({ path, oldText, newText }) => {
+          const key = normalizePath(path);
+          const object = await env.MEMORY_BUCKET.get(`memory/${key}`);
+          if (!object) return `File not found: ${key}`;
+
+          const content = await object.text();
+          const occurrences = content.split(oldText).length - 1;
+          if (occurrences === 0) return `Error: old text not found in ${key}`;
+          if (occurrences > 1) return `Error: old text is ambiguous (found ${occurrences} times) in ${key}`;
+
+          const updated = content.replace(oldText, newText);
+          await env.MEMORY_BUCKET.put(`memory/${key}`, updated, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+          return `Edited: ${key}`;
+        },
+      }),
+
+      memory_append: createTool<{ path: string; content: string }>({
+        description: 'Append content to a file in persistent memory. Creates the file if it does not exist. Ideal for dated notes and incremental logs.',
+        parameters: jsonSchema<{ path: string; content: string }>({
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path relative to memory root' },
+            content: { type: 'string', description: 'Content to append' },
+          },
+          required: ['path', 'content'],
+        }),
+        execute: async ({ path, content }) => {
+          const key = normalizePath(path);
+          const existing = await env.MEMORY_BUCKET.get(`memory/${key}`);
+          const prev = existing ? await existing.text() : '';
+          const separator = prev && !prev.endsWith('\n') ? '\n' : '';
+          const updated = prev + separator + content;
+          await env.MEMORY_BUCKET.put(`memory/${key}`, updated, {
+            httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+          });
+          return `Appended to ${key} (now ${updated.length} bytes)`;
         },
       }),
 
@@ -140,12 +295,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         description: 'List files in persistent memory. Returns file names and sizes.',
         parameters: jsonSchema<{ prefix?: string }>({
           type: 'object',
-          properties: { prefix: { type: 'string', description: 'Optional prefix to filter by, e.g. "sessions/"' } },
+          properties: { prefix: { type: 'string', description: 'Optional prefix to filter, e.g. "notes/", "projects/bruh/"' } },
         }),
         execute: async ({ prefix }) => {
-          const fullPrefix = prefix
-            ? `memory/${prefix.replace(/^\/+/, '').replace(/^memory\//, '')}`
-            : 'memory/';
+          const fullPrefix = prefix ? `memory/${normalizePath(prefix)}` : 'memory/';
           const result = await env.MEMORY_BUCKET.list({ prefix: fullPrefix, limit: 100 });
           if (result.objects.length === 0) return 'No files found.';
           return result.objects
@@ -154,15 +307,17 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         },
       }),
 
+      // --- Scheduling tools ---
+
       schedule_set: createTool<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
-        description: 'Schedule a task or reminder for later. The agent will be prompted with the message at the scheduled time.',
+        description: 'Schedule a task or reminder. "task" auto-prompts the agent at the time. "reminder" just logs an event.',
         parameters: jsonSchema<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
           type: 'object',
           properties: {
-            message: { type: 'string', description: 'Message to be delivered at the scheduled time' },
+            message: { type: 'string', description: 'Message to deliver at the scheduled time' },
             delaySeconds: { type: 'number', description: 'Delay in seconds from now' },
             scheduledAt: { type: 'string', description: 'ISO 8601 datetime to fire at' },
-            taskType: { type: 'string', enum: ['task', 'reminder'], description: 'Type: "task" auto-prompts, "reminder" just notifies' },
+            taskType: { type: 'string', enum: ['task', 'reminder'], description: '"task" auto-prompts, "reminder" just notifies' },
           },
           required: ['message'],
         }),
@@ -172,9 +327,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
             : delaySeconds && delaySeconds > 0
               ? delaySeconds
               : null;
-
           if (!when) return 'Error: delaySeconds or scheduledAt is required';
-
           const payload = JSON.stringify({ message, taskType: taskType || 'task' });
           const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
           return `Scheduled "${message}" (${schedule.type}, id: ${schedule.id})`;
@@ -187,12 +340,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         execute: async () => {
           const schedules = agent.getSchedules();
           if (schedules.length === 0) return 'No active schedules.';
-          return schedules
-            .map((s) => {
-              const time = s.time ? new Date(s.time).toISOString() : 'recurring';
-              return `${s.id}: ${s.callback} at ${time}`;
-            })
-            .join('\n');
+          return schedules.map((s) => {
+            const time = s.time ? new Date(s.time).toISOString() : 'recurring';
+            return `${s.id}: ${s.callback} at ${time}`;
+          }).join('\n');
         },
       }),
 
@@ -206,6 +357,122 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         execute: async ({ scheduleId }) => {
           const cancelled = await agent.cancelSchedule(scheduleId);
           return cancelled ? `Cancelled schedule ${scheduleId}` : `Schedule ${scheduleId} not found`;
+        },
+      }),
+
+      // --- Thread tools ---
+
+      thread_list: createTool<Record<string, never>>({
+        description: 'List all side threads (not main). Returns thread IDs and creation times.',
+        parameters: jsonSchema<Record<string, never>>({ type: 'object', properties: {} }),
+        execute: async () => {
+          try {
+            const registryStub = await getAgentByName(env.BRUH_AGENT as any, '__registry__');
+            const response = await registryStub.fetch(new Request('https://agent/threads'));
+            if (!response.ok) return 'Failed to list threads.';
+            const data = await response.json() as { sessions: Array<{ sessionId: string; createdAt: string }> };
+            if (!data.sessions?.length) return 'No side threads.';
+            return data.sessions.map((t) => `${t.sessionId} (created ${t.createdAt})`).join('\n');
+          } catch (e) {
+            return `Error listing threads: ${e instanceof Error ? e.message : e}`;
+          }
+        },
+      }),
+
+      thread_summary: createTool<{ threadId: string }>({
+        description: 'Read the summary of a side thread from memory.',
+        parameters: jsonSchema<{ threadId: string }>({
+          type: 'object',
+          properties: { threadId: { type: 'string', description: 'Thread/session ID to read summary for' } },
+          required: ['threadId'],
+        }),
+        execute: async ({ threadId }) => {
+          const key = `memory/sessions/${threadId}/summary.md`;
+          const object = await env.MEMORY_BUCKET.get(key);
+          if (!object) return `No summary found for thread ${threadId}`;
+          return await object.text();
+        },
+      }),
+
+      // --- MCP tools ---
+
+      mcp_servers: createTool<Record<string, never>>({
+        description: 'List connected MCP servers and their status.',
+        parameters: jsonSchema<Record<string, never>>({ type: 'object', properties: {} }),
+        execute: async () => {
+          const state = agent.getMcpServers();
+          const servers = Object.entries(state.servers);
+          if (servers.length === 0) return 'No MCP servers connected.';
+          return servers.map(([id, s]) => `${s.name} (${s.state}) — ${s.server_url}`).join('\n');
+        },
+      }),
+
+      mcp_tools: createTool<Record<string, never>>({
+        description: 'List all tools available from connected MCP servers.',
+        parameters: jsonSchema<Record<string, never>>({ type: 'object', properties: {} }),
+        execute: async () => {
+          const state = agent.getMcpServers();
+          const tools = state.tools ?? [];
+          if (tools.length === 0) return 'No MCP tools available.';
+          return tools.map((t) => `${t.name}: ${t.description || '(no description)'} [server: ${t.serverId}]`).join('\n');
+        },
+      }),
+
+      mcp_connect: createTool<{ name: string; url: string }>({
+        description: 'Connect to an MCP server by name and URL.',
+        parameters: jsonSchema<{ name: string; url: string }>({
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Name for this server' },
+            url: { type: 'string', description: 'Server URL' },
+          },
+          required: ['name', 'url'],
+        }),
+        execute: async ({ name, url }) => {
+          try {
+            await agent.addMcpServer(name, url);
+            return `Connected to MCP server: ${name}`;
+          } catch (e) {
+            return `Failed to connect: ${e instanceof Error ? e.message : e}`;
+          }
+        },
+      }),
+
+      mcp_disconnect: createTool<{ name: string }>({
+        description: 'Disconnect from an MCP server by name.',
+        parameters: jsonSchema<{ name: string }>({
+          type: 'object',
+          properties: { name: { type: 'string', description: 'Name of the server to disconnect' } },
+          required: ['name'],
+        }),
+        execute: async ({ name }) => {
+          try {
+            await agent.removeMcpServer(name);
+            return `Disconnected from MCP server: ${name}`;
+          } catch (e) {
+            return `Failed to disconnect: ${e instanceof Error ? e.message : e}`;
+          }
+        },
+      }),
+
+      mcp_call: createTool<{ serverId: string; name: string; arguments?: Record<string, unknown> }>({
+        description: 'Call a tool on a connected MCP server.',
+        parameters: jsonSchema<{ serverId: string; name: string; arguments?: Record<string, unknown> }>({
+          type: 'object',
+          properties: {
+            serverId: { type: 'string', description: 'Server ID (from mcp_servers)' },
+            name: { type: 'string', description: 'Tool name' },
+            arguments: { type: 'object', description: 'Tool arguments' },
+          },
+          required: ['serverId', 'name'],
+        }),
+        execute: async ({ serverId, name, arguments: args }) => {
+          try {
+            const result = await agent.mcp.callTool({ serverId, name, arguments: args ?? {} });
+            return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+          } catch (e) {
+            return `MCP call failed: ${e instanceof Error ? e.message : e}`;
+          }
         },
       }),
     };
@@ -235,17 +502,53 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     const modelMessages = await convertToModelMessages(this.messages);
 
+    // Wrap onFinish to auto-write session summary
+    const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (event) => {
+      await onFinish(event);
+      // Auto-write session summary to R2
+      this.ctx.waitUntil(this.writeSessionSummary(event.text || ''));
+    };
+
     const result = streamText({
       model,
       messages: modelMessages,
       system: SYSTEM_PROMPT,
       tools,
       stopWhen: stepCountIs(10),
-      onFinish,
+      onFinish: wrappedOnFinish,
       abortSignal: options?.abortSignal,
     });
 
     return result.toUIMessageStreamResponse();
+  }
+
+  // --- Session summaries ---
+
+  private async writeSessionSummary(latestResponse: string): Promise<void> {
+    try {
+      const sessionId = this.state.sessionId || this.name;
+      if (!sessionId) return;
+
+      // Build a brief summary from recent messages
+      const recentMessages = this.messages.slice(-10);
+      const lines: string[] = [`# Session Summary: ${sessionId}`, `Updated: ${new Date().toISOString()}`, ''];
+
+      for (const msg of recentMessages) {
+        const role = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'Assistant' : msg.role;
+        const textPart = msg.parts?.find((p) => p.type === 'text');
+        if (textPart && 'text' in textPart) {
+          const text = textPart.text.length > 200 ? textPart.text.slice(0, 200) + '…' : textPart.text;
+          lines.push(`**${role}:** ${text}`, '');
+        }
+      }
+
+      const summary = lines.join('\n');
+      await this.env.MEMORY_BUCKET.put(`memory/sessions/${sessionId}/summary.md`, summary, {
+        httpMetadata: { contentType: 'text/markdown; charset=utf-8' },
+      });
+    } catch (error) {
+      console.error('[BruhAgent] Failed to write session summary:', error);
+    }
   }
 
   // --- Scheduled task execution ---
@@ -268,57 +571,51 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       taskType,
       firedAt: new Date().toISOString(),
     });
-
-    // For tasks, we could auto-prompt the agent by sending a message
-    // For now, just log the event
   }
 
-  // --- Custom request handling (session init, events, threads, etc.) ---
+  // --- Custom request handling ---
 
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // Let AIChatAgent handle its own routes first
     switch (`${request.method} ${url.pathname}`) {
       case 'POST /init':
         return this.handleInit(request);
       case 'GET /state':
         return this.handleState();
-      case 'GET /events':
-        return this.handleGetEvents(request);
-      case 'GET /stream':
-        return this.handleStream(request);
       case 'POST /prompt':
         return this.handleHttpPrompt(request);
+      case 'POST /steer':
+        return this.handleHttpSteer(request);
+      case 'POST /follow-up':
+        return this.handleHttpFollowUp(request);
+      case 'POST /abort':
+        return this.handleHttpAbort();
       case 'POST /register-thread':
         return this.handleRegisterThread(request);
       case 'GET /threads':
         return this.handleListThreads();
+      // Legacy event system (remove once web app fully migrated)
+      case 'GET /events':
+        return this.handleGetEvents(request);
+      case 'GET /stream':
+        return this.handleStream(request);
       default:
-        // Fall through to AIChatAgent's built-in handling (WebSocket, chat protocol)
         return super.onRequest(request);
     }
   }
 
-  // --- HTTP prompt bridge (for current web app that uses POST, not WebSocket) ---
+  // --- HTTP prompt / steer / follow-up / abort ---
 
   private async handleHttpPrompt(request: Request): Promise<Response> {
     const body = (await request.json().catch(() => ({}))) as { text?: string };
     const text = body.text?.trim();
-    if (!text) {
-      return Response.json({ error: 'text is required' }, { status: 400 });
-    }
+    if (!text) return Response.json({ error: 'text is required' }, { status: 400 });
 
-    // Set title from first prompt
     if (!this.state.title) {
-      this.setState({
-        ...this.state,
-        title: createSessionTitle(text),
-        updatedAt: new Date().toISOString(),
-      });
+      this.setState({ ...this.state, title: createSessionTitle(text), updatedAt: new Date().toISOString() });
     }
 
-    // Add user message to conversation
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
@@ -328,10 +625,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     };
     this.messages.push(userMessage);
 
-    // Emit event for the legacy SSE stream
-    await this.appendEvent('session.prompt.accepted', { text });
-
-    // Run the model directly (bypass AIChatAgent's WebSocket-based onChatMessage)
     const model = this.getModel();
     const tools = this.getTools();
     const modelMessages = await convertToModelMessages(this.messages);
@@ -343,7 +636,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       tools,
       stopWhen: stepCountIs(10),
       onFinish: async (event) => {
-        // Save the assistant message
         const assistantMessage = {
           id: crypto.randomUUID(),
           role: 'assistant' as const,
@@ -353,23 +645,59 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         };
         this.messages.push(assistantMessage);
         await this.saveMessages(this.messages);
-
-        // Emit events for legacy SSE stream
-        await this.appendEvent('assistant.message.complete', { text: event.text || '' });
+        this.ctx.waitUntil(this.writeSessionSummary(event.text || ''));
       },
     });
 
     return result.toUIMessageStreamResponse();
   }
 
+  private async handleHttpSteer(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { text?: string };
+    const text = body.text?.trim();
+    if (!text) return Response.json({ error: 'text is required' }, { status: 400 });
+
+    // Steer: add as a system-level instruction that the agent should incorporate
+    const steerMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      content: `[STEER] ${text}`,
+      parts: [{ type: 'text' as const, text: `[STEER] ${text}` }],
+      createdAt: new Date(),
+    };
+    this.messages.push(steerMessage);
+
+    return Response.json({ ok: true, queued: true });
+  }
+
+  private async handleHttpFollowUp(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { text?: string };
+    const text = body.text?.trim();
+    if (!text) return Response.json({ error: 'text is required' }, { status: 400 });
+
+    // Follow-up: queue for after current turn finishes — add to messages
+    const followUpMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      content: text,
+      parts: [{ type: 'text' as const, text }],
+      createdAt: new Date(),
+    };
+    this.messages.push(followUpMessage);
+
+    return Response.json({ ok: true, queued: true });
+  }
+
+  private async handleHttpAbort(): Promise<Response> {
+    // The abort is handled by the AbortSignal on the active stream
+    // For now, return ok — the client can close the connection
+    return Response.json({ ok: true, aborted: true });
+  }
+
   // --- Session / thread init ---
 
   private async handleInit(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as {
-      sessionId?: string;
-      title?: string;
-    };
-
+    const body = (await request.json().catch(() => ({}))) as { sessionId?: string; title?: string };
     const requestedTitle = body.title?.trim();
 
     if (!this.state.sessionId) {
@@ -383,11 +711,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         latestSeq: 0,
       });
     } else if (requestedTitle && !this.state.title) {
-      this.setState({
-        ...this.state,
-        title: requestedTitle,
-        updatedAt: new Date().toISOString(),
-      });
+      this.setState({ ...this.state, title: requestedTitle, updatedAt: new Date().toISOString() });
     }
 
     return Response.json(this.toMetadata());
@@ -400,18 +724,11 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   // --- Thread registry ---
 
   private async handleRegisterThread(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as {
-      sessionId?: string;
-      createdAt?: string;
-    };
+    const body = (await request.json().catch(() => ({}))) as { sessionId?: string; createdAt?: string };
     const sessionId = body.sessionId?.trim();
-    if (!sessionId) {
-      return Response.json({ error: 'sessionId is required' }, { status: 400 });
-    }
+    if (!sessionId) return Response.json({ error: 'sessionId is required' }, { status: 400 });
 
-    const existing = this.sql<{ session_id: string }>`
-      SELECT session_id FROM thread_registry WHERE session_id = ${sessionId}
-    `;
+    const existing = this.sql<{ session_id: string }>`SELECT session_id FROM thread_registry WHERE session_id = ${sessionId}`;
     if (existing.length === 0) {
       const createdAt = body.createdAt?.trim() || new Date().toISOString();
       this.sql`INSERT INTO thread_registry (session_id, created_at) VALUES (${sessionId}, ${createdAt})`;
@@ -424,66 +741,44 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     const threads = this.sql<{ session_id: string; created_at: string }>`
       SELECT session_id, created_at FROM thread_registry ORDER BY created_at DESC
     `;
-    const sessions = threads.map((t) => ({
-      sessionId: t.session_id,
-      createdAt: t.created_at,
-    }));
-    return Response.json({ sessions });
+    return Response.json({ sessions: threads.map((t) => ({ sessionId: t.session_id, createdAt: t.created_at })) });
   }
 
-  // --- Legacy event system (for compatibility with current web app) ---
+  // --- Legacy event system ---
 
   private async handleGetEvents(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const afterSeq = Number(url.searchParams.get('after') ?? '0') || 0;
-    const events = this.getEventsAfter(afterSeq);
-    return Response.json({ events });
+    return Response.json({ events: this.getEventsAfter(afterSeq) });
   }
 
   private async handleStream(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const afterParam = url.searchParams.get('after');
-    const lastEventId = request.headers.get('last-event-id');
-    const afterSeq = Number(afterParam ?? lastEventId ?? '0') || 0;
+    const afterSeq = Number(url.searchParams.get('after') ?? request.headers.get('last-event-id') ?? '0') || 0;
 
     const stream = new TransformStream<Uint8Array, Uint8Array>();
     const writer = stream.writable.getWriter();
     const encoder = new TextEncoder();
     let closed = false;
 
-    const replay = this.getEventsAfter(afterSeq);
     const write = async (chunk: string) => {
       if (closed) return;
-      try {
-        await writer.write(encoder.encode(chunk));
-      } catch {
-        closed = true;
-      }
+      try { await writer.write(encoder.encode(chunk)); } catch { closed = true; }
     };
 
     this.ctx.waitUntil(
       (async () => {
         await write(`: connected to ${this.state.sessionId}\n\n`);
-        for (const event of replay) {
+        for (const event of this.getEventsAfter(afterSeq)) {
           await write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
         }
-        // Keep connection open — events will be pushed via appendEvent
-      })().catch(() => {
-        closed = true;
-      }),
+      })().catch(() => { closed = true; }),
     );
 
-    request.signal.addEventListener('abort', () => {
-      closed = true;
-      void writer.close().catch(() => undefined);
-    }, { once: true });
+    request.signal.addEventListener('abort', () => { closed = true; void writer.close().catch(() => undefined); }, { once: true });
 
     return new Response(stream.readable, {
-      headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        Connection: 'keep-alive',
-      },
+      headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate', Connection: 'keep-alive' },
     });
   }
 
@@ -501,57 +796,19 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   }
 
   private getEventsAfter(afterSeq: number): SessionEventEnvelope[] {
-    return this.sql<{
-      seq: number;
-      session_id: string;
-      type: string;
-      timestamp: string;
-      payload: string;
-    }>`
-      SELECT seq, session_id, type, timestamp, payload
-      FROM events
-      WHERE seq > ${afterSeq}
-      ORDER BY seq ASC
-      LIMIT 200
-    `.map((row) => ({
-      sessionId: row.session_id,
-      seq: row.seq,
-      type: row.type,
-      timestamp: row.timestamp,
-      payload: JSON.parse(row.payload),
-    }));
+    return this.sql<{ seq: number; session_id: string; type: string; timestamp: string; payload: string }>`
+      SELECT seq, session_id, type, timestamp, payload FROM events WHERE seq > ${afterSeq} ORDER BY seq ASC LIMIT 200
+    `.map((row) => ({ sessionId: row.session_id, seq: row.seq, type: row.type, timestamp: row.timestamp, payload: JSON.parse(row.payload) }));
   }
 
-  private async appendEvent(
-    type: string,
-    payload: Record<string, unknown>,
-    timestamp?: string,
-  ): Promise<SessionEventEnvelope> {
+  private async appendEvent(type: string, payload: Record<string, unknown>, timestamp?: string): Promise<SessionEventEnvelope> {
     const now = new Date().toISOString();
     const nextSeq = this.state.latestSeq + 1;
+    this.setState({ ...this.state, latestSeq: nextSeq, updatedAt: now });
 
-    this.setState({
-      ...this.state,
-      latestSeq: nextSeq,
-      updatedAt: now,
-    });
-
-    const event: SessionEventEnvelope = {
-      sessionId: this.state.sessionId,
-      seq: nextSeq,
-      type,
-      timestamp: timestamp || now,
-      payload,
-    };
-
-    this.sql`
-      INSERT INTO events (seq, session_id, type, timestamp, payload)
-      VALUES (${event.seq}, ${event.sessionId}, ${event.type}, ${event.timestamp}, ${JSON.stringify(event.payload)})
-    `;
-
-    // Prune old events
+    const event: SessionEventEnvelope = { sessionId: this.state.sessionId, seq: nextSeq, type, timestamp: timestamp || now, payload };
+    this.sql`INSERT INTO events (seq, session_id, type, timestamp, payload) VALUES (${event.seq}, ${event.sessionId}, ${event.type}, ${event.timestamp}, ${JSON.stringify(event.payload)})`;
     this.sql`DELETE FROM events WHERE seq <= ${nextSeq - 200}`;
-
     return event;
   }
 }

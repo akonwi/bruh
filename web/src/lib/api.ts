@@ -37,3 +37,26 @@ export async function getSession(sessionId: string): Promise<SessionState> {
   if (!response.ok) throw new Error(`Failed to load session: ${response.status}`);
   return response.json();
 }
+
+export async function steerSession(sessionId: string, text: string): Promise<void> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}/steer`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(`Failed to steer session: ${response.status}`);
+}
+
+export async function followUpSession(sessionId: string, text: string): Promise<void> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}/follow-up`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(`Failed to follow up: ${response.status}`);
+}
+
+export async function abortSession(sessionId: string): Promise<void> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}/abort`), { method: 'POST' });
+  if (!response.ok) throw new Error(`Failed to abort: ${response.status}`);
+}
