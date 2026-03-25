@@ -284,6 +284,8 @@ function MessageItem({ message }: { message: UIMessage }) {
 }
 
 function ToolPart({ part }: { part: any }) {
+  // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
+  const toolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
   const isRunning = part.state === 'call' || part.state === 'partial-call'
   const isError = part.state === 'result' && typeof part.result === 'string' && part.result.startsWith('Error:')
   const isDone = part.state === 'result'
@@ -317,7 +319,7 @@ function ToolPart({ part }: { part: any }) {
               <CheckCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
             )}
             <p className='truncate text-sm font-medium text-foreground'>
-              {truncateInline(formatToolName(part.toolName))}
+              {truncateInline(formatToolName(toolName))}
             </p>
           </div>
           <CaretRight className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
@@ -325,7 +327,7 @@ function ToolPart({ part }: { part: any }) {
         <div className='border-t bg-background/80 px-3 py-3 text-xs text-foreground'>
           <div className='mb-2 flex items-center gap-2 text-muted-foreground'>
             <Wrench className='size-3.5' />
-            <span>{formatToolName(part.toolName)}</span>
+            <span>{formatToolName(toolName)}</span>
           </div>
           {resultText ? (
             <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>{resultText}</pre>
