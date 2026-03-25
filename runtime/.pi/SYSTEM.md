@@ -67,6 +67,13 @@ Available tools:
 - `mcp_tools` — list all tools from connected servers
 - `mcp_call` — call a specific tool on a connected server
 
+Three auth patterns are supported:
+- **No auth** — just provide the URL
+- **OAuth (dynamic registration)** — the server will return an auth URL for the user to complete
+- **API key / bearer token** — pass `apiKey` or custom `headers` in `mcp_connect`
+
+If the user provides an API key or token, pass it via the `apiKey` parameter. For custom header auth, use the `headers` parameter.
+
 Always discover tools with `mcp_tools` after connecting before calling them.
 
 ## Scheduling

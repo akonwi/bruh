@@ -56,23 +56,56 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       name: Type.String({ description: 'A short name for this server (e.g., "github", "slack")' }),
       url: Type.String({ description: 'URL of the MCP server' }),
+      apiKey: Type.Optional(
+        Type.String({ description: 'API key or bearer token for servers that require explicit auth. Sent as Authorization: Bearer <key>.' }),
+      ),
+      headers: Type.Optional(
+        Type.Record(Type.String(), Type.String(), {
+          description: 'Custom HTTP headers for servers that need specific auth headers.',
+        }),
+      ),
+      transport: Type.Optional(
+        Type.Union([Type.Literal('auto'), Type.Literal('streamable-http'), Type.Literal('sse')], {
+          description: 'Transport type. Default: auto.',
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { name, url } = params as { name: string; url: string }
+      const { name, url, apiKey, headers: customHeaders, transport: transportType } = params as {
+        name: string
+        url: string
+        apiKey?: string
+        headers?: Record<string, string>
+        transport?: string
+      }
       const sessionId = getSessionId(ctx)
 
       const edgeBaseUrl = getEdgeBaseUrl()
+
+      const transportHeaders: Record<string, string> = { ...customHeaders }
+      if (apiKey?.trim()) {
+        transportHeaders['Authorization'] = `Bearer ${apiKey.trim()}`
+      }
+
+      const connectBody: Record<string, unknown> = {
+        name: name.trim(),
+        url: url.trim(),
+        callbackHost: edgeBaseUrl,
+      }
+
+      if (Object.keys(transportHeaders).length > 0 || transportType) {
+        connectBody.transport = {
+          ...(Object.keys(transportHeaders).length > 0 ? { headers: transportHeaders } : {}),
+          ...(transportType ? { type: transportType } : {}),
+        }
+      }
 
       const response = await fetch(
         `${edgeBaseUrl}/internal/sessions/${encodeURIComponent(sessionId)}/mcp/connect`,
         {
           method: 'POST',
           headers: createHeaders(),
-          body: JSON.stringify({
-            name: name.trim(),
-            url: url.trim(),
-            callbackHost: edgeBaseUrl,
-          }),
+          body: JSON.stringify(connectBody),
         },
       )
 
