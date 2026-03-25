@@ -31,6 +31,7 @@ import type { BruhAgent } from './bruh-agent';
 export interface Env {
   BRUH_AGENT: DurableObjectNamespace<BruhAgent>;
   MEMORY_BUCKET: R2Bucket;
+  ASSETS?: Fetcher;
   RUNTIME_BASE_URL?: string;
   INTERNAL_API_SECRET?: string;
 }

@@ -9,6 +9,8 @@
     "dev:runtime:local": "cd runtime && bun run dev:local",
     "dev:edge": "cd edge && bun run dev",
     "build": "bun run build:web && bun run build:runtime && bun run build:edge",
+    "predeploy:edge": "bun run build:web && rm -rf edge/public && cp -r web/dist edge/public",
+    "deploy:edge": "bun run predeploy:edge && cd edge && npx wrangler deploy",
     "build:web": "cd web && bun run build",
     "build:runtime": "cd runtime && bun run build",
     "build:edge": "cd edge && bun run build",

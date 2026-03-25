@@ -10,3 +10,6 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 runtime/.data/
+
+# Edge static assets (built from web/)
+edge/public/

@@ -382,27 +382,11 @@ app.post('/internal/storage/edit', async (c) => {
   }
 });
 
-app.get('/', (c) => {
+app.get('/api-info', (c) => {
   return c.json({
     ok: true,
     service: 'edge',
     message: 'Bruh edge worker with Agents.',
-    routes: {
-      createSession: 'POST /sessions',
-      getMainSession: 'GET /main-session',
-      listSessions: 'GET /sessions',
-      getSession: 'GET /sessions/:sessionId',
-      streamSession: 'GET /sessions/:sessionId/stream',
-      promptSession: 'POST /sessions/:sessionId/prompt',
-      steerSession: 'POST /sessions/:sessionId/steer',
-      followUpSession: 'POST /sessions/:sessionId/follow-up',
-      abortSession: 'POST /sessions/:sessionId/abort',
-      ingestEvents: 'POST /internal/sessions/:sessionId/events',
-      getStorageObject: 'GET /internal/storage/object?path=memory/...',
-      putStorageObject: 'PUT /internal/storage/object?path=memory/...',
-      listStorageObjects: 'GET /internal/storage/list?prefix=memory/...',
-      editStorageObject: 'POST /internal/storage/edit',
-    },
   });
 });
 
@@ -454,7 +438,18 @@ export default {
       return agentResponse;
     }
 
-    // Fall through to Hono routes
-    return app.fetch(request, env, ctx);
+    // Try Hono API routes
+    const honoResponse = await app.fetch(request, env, ctx);
+
+    // If Hono matched a route, return its response.
+    // If it returned 404, fall through to static assets.
+    if (honoResponse.status !== 404) {
+      return honoResponse;
+    }
+
+    // Let the static asset handler serve the request (SPA fallback).
+    // With run_worker_first + not_found_handling: single-page-application,
+    // returning a non-response here tells Cloudflare to check assets.
+    return env.ASSETS ? env.ASSETS.fetch(request) : honoResponse;
   },
 };
