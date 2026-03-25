@@ -13,15 +13,17 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // API routes → edge worker
       '/api': {
         target: 'http://localhost:8790',
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/api/, ''),
       },
-      '/runtime-api': {
-        target: 'http://localhost:8788',
+      // Agents SDK WebSocket + HTTP routes
+      '/agents': {
+        target: 'http://localhost:8790',
         changeOrigin: true,
-        rewrite: (requestPath) => requestPath.replace(/^\/runtime-api/, ''),
+        ws: true,
       },
     },
   },
