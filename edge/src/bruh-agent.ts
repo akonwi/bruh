@@ -111,6 +111,13 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
   async onStart(): Promise<void> {
     this.ensureSchema();
+
+    // After OAuth completes, redirect back to the app root
+    this.mcp.configureOAuthCallback({
+      successRedirect: '/',
+      errorRedirect: '/?mcp_error=1',
+    });
+
     await this.connectConfiguredMcpServers();
   }
 
@@ -173,7 +180,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           };
         }
 
-        await this.addMcpServer(config.name, config.url, options);
+        const result = await this.addMcpServer(config.name, config.url, options);
+        if (result.state === 'authenticating') {
+          console.log(`[BruhAgent] MCP server ${config.name} requires OAuth: ${result.authUrl}`);
+        }
       } catch (error) {
         console.error(`[BruhAgent] Failed to connect MCP server ${config.name}:`, error instanceof Error ? error.message : error);
       }
@@ -440,37 +450,48 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         },
       }),
 
-      mcp_connect: createTool<{ name: string; url: string }>({
-        description: 'Connect to an MCP server by name and URL.',
-        parameters: jsonSchema<{ name: string; url: string }>({
+      mcp_connect: createTool<{ name: string; url: string; headers?: Record<string, string> }>({
+        description: 'Connect to an MCP server. For OAuth servers, returns an authorization URL the user must visit. For non-OAuth servers, connects immediately. MCP tools become available on the next turn.',
+        parameters: jsonSchema<{ name: string; url: string; headers?: Record<string, string> }>({
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Name for this server' },
             url: { type: 'string', description: 'Server URL' },
+            headers: { type: 'object', description: 'Optional transport headers (e.g. Authorization)' },
           },
           required: ['name', 'url'],
         }),
-        execute: async ({ name, url }) => {
+        execute: async ({ name, url, headers }) => {
           try {
-            await agent.addMcpServer(name, url);
-            return `Connected to MCP server: ${name}`;
+            const options: Record<string, unknown> = {};
+            if (headers && Object.keys(headers).length > 0) {
+              options.transport = { headers };
+            }
+
+            const result = await agent.addMcpServer(name, url, options);
+
+            if (result.state === 'authenticating') {
+              return `🔐 Server "${name}" requires OAuth authorization.\n\nPlease visit this URL to authorize:\n${result.authUrl}\n\nOnce authorized, the server's tools will become available.`;
+            }
+
+            return `Connected to MCP server: ${name} (id: ${result.id}). Its tools will be available on the next message.`;
           } catch (e) {
             return `Failed to connect: ${e instanceof Error ? e.message : e}`;
           }
         },
       }),
 
-      mcp_disconnect: createTool<{ name: string }>({
-        description: 'Disconnect from an MCP server by name.',
-        parameters: jsonSchema<{ name: string }>({
+      mcp_disconnect: createTool<{ serverId: string }>({
+        description: 'Disconnect from an MCP server by its ID (from mcp_servers).',
+        parameters: jsonSchema<{ serverId: string }>({
           type: 'object',
-          properties: { name: { type: 'string', description: 'Name of the server to disconnect' } },
-          required: ['name'],
+          properties: { serverId: { type: 'string', description: 'Server ID to disconnect' } },
+          required: ['serverId'],
         }),
-        execute: async ({ name }) => {
+        execute: async ({ serverId }) => {
           try {
-            await agent.removeMcpServer(name);
-            return `Disconnected from MCP server: ${name}`;
+            await agent.removeMcpServer(serverId);
+            return `Disconnected MCP server: ${serverId}`;
           } catch (e) {
             return `Failed to disconnect: ${e instanceof Error ? e.message : e}`;
           }
@@ -478,7 +499,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       }),
 
       // Note: MCP tools from connected servers are automatically available to the model
-      // via this.getAITools() — no need for a manual mcp_call wrapper.
+      // via this.mcp.getAITools() — no need for a manual mcp_call wrapper.
     };
   }
 
