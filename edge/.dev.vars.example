@@ -6,5 +6,8 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 # Host for MCP OAuth callbacks (required for OAuth MCP servers)
 HOST=http://localhost:8790
 
+# Frontend origin for post-OAuth redirect (dev only — not needed in production)
+APP_ORIGIN=http://localhost:5173
+
 # Internal API secret for storage routes (optional for local dev)
 # INTERNAL_API_SECRET=your-secret-here

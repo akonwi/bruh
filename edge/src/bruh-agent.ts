@@ -113,10 +113,12 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   async onStart(): Promise<void> {
     this.ensureSchema();
 
-    // After OAuth completes, redirect back to the app root
+    // After OAuth completes, redirect back to the app
+    // In dev, frontend runs on a different port than the edge worker
+    const appOrigin = this.env.APP_ORIGIN?.trim() || '';
     this.mcp.configureOAuthCallback({
-      successRedirect: '/',
-      errorRedirect: '/?mcp_error=1',
+      successRedirect: `${appOrigin}/`,
+      errorRedirect: `${appOrigin}/?mcp_error=1`,
     });
 
     await this.connectConfiguredMcpServers();
