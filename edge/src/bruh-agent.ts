@@ -437,7 +437,16 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           const state = agent.getMcpServers();
           const servers = Object.entries(state.servers);
           if (servers.length === 0) return 'No MCP servers connected.';
-          return servers.map(([id, s]) => `${s.name} (${s.state}) — ${s.server_url}`).join('\n');
+          return servers.map(([id, s]) => {
+            let line = `${s.name} [id: ${id}] (${s.state}) — ${s.server_url}`;
+            if (s.state === 'authenticating' && s.auth_url) {
+              line += `\n  Auth URL: ${s.auth_url}`;
+            }
+            if (s.state === 'failed' && s.error) {
+              line += `\n  Error: ${s.error}`;
+            }
+            return line;
+          }).join('\n');
         },
       }),
 
@@ -509,17 +518,21 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         },
       }),
 
-      mcp_disconnect: createTool<{ serverId: string }>({
-        description: 'Disconnect from an MCP server by its ID (from mcp_servers).',
-        parameters: jsonSchema<{ serverId: string }>({
+      mcp_disconnect: createTool<{ name: string }>({
+        description: 'Disconnect from an MCP server by name.',
+        parameters: jsonSchema<{ name: string }>({
           type: 'object',
-          properties: { serverId: { type: 'string', description: 'Server ID to disconnect' } },
-          required: ['serverId'],
+          properties: { name: { type: 'string', description: 'Server name to disconnect' } },
+          required: ['name'],
         }),
-        execute: async ({ serverId }) => {
+        execute: async ({ name }) => {
           try {
-            await agent.removeMcpServer(serverId);
-            return `Disconnected MCP server: ${serverId}`;
+            // Look up the server ID by name
+            const state = agent.getMcpServers();
+            const entry = Object.entries(state.servers).find(([, s]) => s.name === name);
+            if (!entry) return `No MCP server found with name: ${name}`;
+            await agent.removeMcpServer(entry[0]);
+            return `Disconnected MCP server: ${name}`;
           } catch (e) {
             return `Failed to disconnect: ${e instanceof Error ? e.message : e}`;
           }
