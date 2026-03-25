@@ -437,8 +437,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           const state = agent.getMcpServers();
           const servers = Object.entries(state.servers);
           if (servers.length === 0) return 'No MCP servers connected.';
-          return servers.map(([id, s]) => {
-            let line = `${s.name} [id: ${id}] (${s.state}) — ${s.server_url}`;
+          return servers.map(([, s]) => {
+            let line = `${s.name} (${s.state}) — ${s.server_url}`;
             if (s.state === 'authenticating' && s.auth_url) {
               line += `\n  Auth URL: ${s.auth_url}`;
             }
