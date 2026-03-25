@@ -106,6 +106,9 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     latestSeq: 0,
   };
 
+  // Wait up to 10s for MCP servers to connect before handling chat messages
+  waitForMcpConnections = { timeout: 10_000 };
+
   async onStart(): Promise<void> {
     this.ensureSchema();
     await this.connectConfiguredMcpServers();
@@ -474,26 +477,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         },
       }),
 
-      mcp_call: createTool<{ serverId: string; name: string; arguments?: Record<string, unknown> }>({
-        description: 'Call a tool on a connected MCP server.',
-        parameters: jsonSchema<{ serverId: string; name: string; arguments?: Record<string, unknown> }>({
-          type: 'object',
-          properties: {
-            serverId: { type: 'string', description: 'Server ID (from mcp_servers)' },
-            name: { type: 'string', description: 'Tool name' },
-            arguments: { type: 'object', description: 'Tool arguments' },
-          },
-          required: ['serverId', 'name'],
-        }),
-        execute: async ({ serverId, name, arguments: args }) => {
-          try {
-            const result = await agent.mcp.callTool({ serverId, name, arguments: args ?? {} });
-            return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          } catch (e) {
-            return `MCP call failed: ${e instanceof Error ? e.message : e}`;
-          }
-        },
-      }),
+      // Note: MCP tools from connected servers are automatically available to the model
+      // via this.getAITools() — no need for a manual mcp_call wrapper.
     };
   }
 
@@ -504,7 +489,9 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     options?: OnChatMessageOptions,
   ): Promise<Response | undefined> {
     const model = this.getModel();
-    const tools = this.getTools();
+    // Merge custom tools with MCP tools from connected servers
+    const mcpTools = this.mcp.getAITools();
+    const tools = { ...this.getTools(), ...mcpTools };
 
     // Set title from first user message
     const lastUserMessage = [...this.messages].reverse().find((m) => m.role === 'user');
@@ -681,7 +668,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     this.messages.push(userMessage);
 
     const model = this.getModel();
-    const tools = this.getTools();
+    const mcpTools = this.mcp.getAITools();
+    const tools = { ...this.getTools(), ...mcpTools };
     const modelMessages = await convertToModelMessages(this.messages);
 
     const result = streamText({
