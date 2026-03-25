@@ -417,7 +417,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error('command is required')
       }
 
-      const result = await pi.exec(trimmedCommand, [], {
+      const result = await pi.exec('bash', ['-c', trimmedCommand], {
         cwd: workspaceRoot,
         timeout: timeout ?? 30_000,
         signal: signal ?? undefined,
