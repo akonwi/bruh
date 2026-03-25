@@ -7,11 +7,6 @@
   "observability": {
     "enabled": true
   },
-  // Pre-configured MCP servers. Tokens come from secrets / .dev.vars.
-  // Each entry: { name, url, authEnvVar?, transport?, headers? }
-  "vars": {
-    "MCP_SERVERS": "[]"
-  },
   "durable_objects": {
     "bindings": [
       {
