@@ -68,6 +68,11 @@ function createHeaders(includeJson = false): Record<string, string> {
     headers['X-Bruh-Internal-Secret'] = secret
   }
 
+  const cfId = process.env.CF_ACCESS_CLIENT_ID?.trim()
+  const cfSecret = process.env.CF_ACCESS_CLIENT_SECRET?.trim()
+  if (cfId) headers['CF-Access-Client-Id'] = cfId
+  if (cfSecret) headers['CF-Access-Client-Secret'] = cfSecret
+
   return headers
 }
 

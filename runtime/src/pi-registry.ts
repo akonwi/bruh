@@ -500,14 +500,25 @@ export class PiSessionRegistry {
     await this.putMemoryObject(`sessions/${sessionId}/summary.md`, content);
   }
 
-  private async putMemoryObject(relativePath: string, content: string): Promise<void> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
+  private buildEdgeHeaders(includeJson = true): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (includeJson) {
+      headers['Content-Type'] = 'application/json';
+    }
     if (this.config.internalApiSecret) {
       headers['X-Bruh-Internal-Secret'] = this.config.internalApiSecret;
     }
+    if (this.config.cfAccessClientId) {
+      headers['CF-Access-Client-Id'] = this.config.cfAccessClientId;
+    }
+    if (this.config.cfAccessClientSecret) {
+      headers['CF-Access-Client-Secret'] = this.config.cfAccessClientSecret;
+    }
+    return headers;
+  }
+
+  private async putMemoryObject(relativePath: string, content: string): Promise<void> {
+    const headers = this.buildEdgeHeaders();
 
     const search = new URLSearchParams({ path: `memory/${relativePath}` });
     const response = await fetch(`${this.config.edgeBaseUrl}/internal/storage/object?${search.toString()}`, {
@@ -526,13 +537,7 @@ export class PiSessionRegistry {
   }
 
   private async publish(sessionId: string, input: PublishInput): Promise<void> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.config.internalApiSecret) {
-      headers['X-Bruh-Internal-Secret'] = this.config.internalApiSecret;
-    }
+    const headers = this.buildEdgeHeaders();
 
     const response = await fetch(`${this.config.edgeBaseUrl}/internal/sessions/${sessionId}/events`, {
       method: 'POST',

@@ -9,6 +9,8 @@ export interface RuntimeConfig {
   anthropicApiKey: string;
   anthropicModel: string;
   internalApiSecret?: string;
+  cfAccessClientId?: string;
+  cfAccessClientSecret?: string;
 }
 
 export async function loadConfig(): Promise<RuntimeConfig> {
@@ -31,5 +33,7 @@ export async function loadConfig(): Promise<RuntimeConfig> {
     anthropicApiKey,
     anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || 'claude-opus-4-6',
     internalApiSecret: process.env.INTERNAL_API_SECRET?.trim() || undefined,
+    cfAccessClientId: process.env.CF_ACCESS_CLIENT_ID?.trim() || undefined,
+    cfAccessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET?.trim() || undefined,
   };
 }

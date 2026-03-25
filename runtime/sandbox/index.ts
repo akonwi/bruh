@@ -8,6 +8,8 @@ interface Env {
   ANTHROPIC_MODEL?: string
   EDGE_BASE_URL?: string
   INTERNAL_API_SECRET?: string
+  CF_ACCESS_CLIENT_ID?: string
+  CF_ACCESS_CLIENT_SECRET?: string
 }
 
 const MAIN_SANDBOX_ID = 'main'
@@ -111,5 +113,7 @@ function buildRuntimeEnv(env: Env): Record<string, string | undefined> {
     INTERNAL_API_SECRET: env.INTERNAL_API_SECRET?.trim() || undefined,
     BRUH_RUNTIME_CWD: RUNTIME_PROJECT_CWD,
     BRUH_RUNTIME_AGENT_DIR: RUNTIME_AGENT_DIR,
+    CF_ACCESS_CLIENT_ID: env.CF_ACCESS_CLIENT_ID?.trim() || undefined,
+    CF_ACCESS_CLIENT_SECRET: env.CF_ACCESS_CLIENT_SECRET?.trim() || undefined,
   }
 }
