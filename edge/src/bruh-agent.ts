@@ -584,25 +584,30 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     console.log(`[BruhAgent] Executing scheduled task: "${prompt}"`);
 
     try {
-      // Run as an ephemeral agent call — the conversation history provides context
-      // but the scheduled prompt is injected as a system instruction, not a user message
+      // Run as an ephemeral agent — standalone prompt, not part of conversation history.
+      // The agent has tools (memory etc.) so it can look up context if needed.
       const model = this.getModel();
       const tools = this.getTools();
-      const modelMessages = await convertToModelMessages(this.messages);
 
       const result = await generateText({
         model,
-        messages: modelMessages,
-        system: `${SYSTEM_PROMPT}\n\n## Active scheduled task\nYou have a scheduled task firing now. Execute it and report the result concisely to the user.\n\nTask: ${prompt}`,
+        prompt: prompt,
+        system: `${SYSTEM_PROMPT}\n\nYou are executing a scheduled task. Carry out the task and report the result concisely. The user will see your response in their chat transcript.`,
         tools,
         stopWhen: stepCountIs(10),
       });
 
-      // Only add the assistant's response to the transcript
+      const responseText = result.text?.trim();
+      if (!responseText) {
+        console.log('[BruhAgent] Scheduled task produced no text output');
+        return;
+      }
+
+      // Post only the result as an assistant message in the transcript
       const assistantMessage = {
         id: crypto.randomUUID(),
         role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: `⏰ ${result.text || '(scheduled task completed)'}` }],
+        parts: [{ type: 'text' as const, text: `⏰ ${responseText}` }],
         createdAt: new Date(),
       };
       this.messages.push(assistantMessage);
