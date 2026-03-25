@@ -90,10 +90,16 @@ function formatMessageTime(timestamp: string | Date | undefined): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(value)
 }
 
-function formatToolName(toolName: string): string {
-  // MCP tools are namespaced as "{serverId}_{toolName}" — strip the ID prefix
-  const stripped = toolName.replace(/^[A-Za-z0-9]{8}_/, '')
-  return stripped.replaceAll('_', ' ')
+function formatToolName(toolName: string, mcpServerNames?: Map<string, string>): string {
+  // MCP tools are namespaced as "{serverId}_{toolName}"
+  const match = toolName.match(/^([A-Za-z0-9]{8})_(.+)$/)
+  if (match) {
+    const [, serverId, name] = match
+    const serverName = mcpServerNames?.get(serverId)
+    const prefix = serverName ?? serverId
+    return `${prefix}: ${name.replaceAll('_', ' ')}`
+  }
+  return toolName.replaceAll('_', ' ')
 }
 
 function truncateInline(value: string, maxLength = 72): string {
@@ -109,7 +115,7 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 
 // --- Chat view using useAgentChat ---
 
-function ChatView({ sessionId, agent }: { sessionId: string; agent: ReturnType<typeof useAgent> }) {
+function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; agent: ReturnType<typeof useAgent>; mcpServerNames: Map<string, string> }) {
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
@@ -185,7 +191,7 @@ function ChatView({ sessionId, agent }: { sessionId: string; agent: ReturnType<t
               </p>
             </div>
           ) : (
-            messages.map((message) => <MessageItem key={message.id} message={message} />)
+            messages.map((message) => <MessageItem key={message.id} message={message} mcpServerNames={mcpServerNames} />)
           )}
 
           {isLoading && !messages.some(m => m.role === 'assistant' && m.parts?.some(p => p.type === 'text' && p.text)) ? (
@@ -263,7 +269,7 @@ function ChatView({ sessionId, agent }: { sessionId: string; agent: ReturnType<t
 
 // --- Message rendering ---
 
-function MessageItem({ message }: { message: UIMessage }) {
+function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServerNames: Map<string, string> }) {
   const isUser = message.role === 'user'
 
   return (
@@ -287,7 +293,7 @@ function MessageItem({ message }: { message: UIMessage }) {
         }
 
         if (part.type && part.type.startsWith('tool-')) {
-          return <ToolPart key={i} part={part as any} />
+          return <ToolPart key={i} part={part as any} mcpServerNames={mcpServerNames} />
         }
 
         return null
@@ -296,11 +302,10 @@ function MessageItem({ message }: { message: UIMessage }) {
   )
 }
 
-function ToolPart({ part }: { part: any }) {
+function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<string, string> }) {
   // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
   const rawToolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
-  // Strip MCP server ID prefix (e.g. "GWEakO7V_search_repositories" → "search_repositories")
-  const toolName = rawToolName.replace(/^[A-Za-z0-9]{8}_/, '')
+  const toolName = formatToolName(rawToolName, mcpServerNames)
 
   // AI SDK v6: states are 'call', 'partial-call', 'result', 'output-available', etc.
   // Properties: input (not args), output (not result)
@@ -340,7 +345,7 @@ function ToolPart({ part }: { part: any }) {
               <CheckCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
             )}
             <p className='truncate text-sm font-medium text-foreground'>
-              {truncateInline(formatToolName(toolName))}
+              {truncateInline(toolName)}
             </p>
           </div>
           <CaretRight className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
@@ -348,7 +353,7 @@ function ToolPart({ part }: { part: any }) {
         <div className='border-t bg-background/80 px-3 py-3 text-xs text-foreground'>
           <div className='mb-2 flex items-center gap-2 text-muted-foreground'>
             <Wrench className='size-3.5' />
-            <span>{formatToolName(toolName)}</span>
+            <span>{toolName}</span>
           </div>
           {resultText ? (
             <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>{resultText}</pre>
@@ -444,6 +449,13 @@ function App() {
   })
 
   const mcpServers = useMemo(() => Object.values(mcpState.servers), [mcpState.servers])
+  const mcpServerNames = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [id, server] of Object.entries(mcpState.servers)) {
+      map.set(id, server.name)
+    }
+    return map
+  }, [mcpState.servers])
 
   return (
     <SidebarProvider className='h-svh max-h-svh overflow-hidden'>
@@ -466,7 +478,7 @@ function App() {
         </header>
 
         {sessionId ? (
-          <ChatView sessionId={sessionId} agent={agent} />
+          <ChatView sessionId={sessionId} agent={agent} mcpServerNames={mcpServerNames} />
         ) : (
           <ThreadList
             sessions={sessions}
