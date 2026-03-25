@@ -91,13 +91,14 @@ function formatMessageTime(timestamp: string | Date | undefined): string {
 }
 
 function formatToolName(toolName: string, mcpServerNames?: Map<string, string>): string {
-  // MCP tools are namespaced as "{serverId}_{toolName}"
-  const match = toolName.match(/^([A-Za-z0-9]{8})_(.+)$/)
-  if (match) {
-    const [, serverId, name] = match
-    const serverName = mcpServerNames?.get(serverId)
-    const prefix = serverName ?? serverId
-    return `${prefix}: ${name.replaceAll('_', ' ')}`
+  // MCP tools are namespaced as "{serverId}_{toolName}" — IDs vary in length
+  if (mcpServerNames && mcpServerNames.size > 0) {
+    for (const [id, name] of mcpServerNames) {
+      if (toolName.startsWith(`${id}_`)) {
+        const rest = toolName.slice(id.length + 1)
+        return `${name}: ${rest.replaceAll('_', ' ')}`
+      }
+    }
   }
   return toolName.replaceAll('_', ' ')
 }
@@ -305,6 +306,7 @@ function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServe
 function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<string, string> }) {
   // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
   const rawToolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
+  // rawToolName already has the full namespaced name — formatToolName handles the lookup
   const toolName = formatToolName(rawToolName, mcpServerNames)
 
   // AI SDK v6: states are 'call', 'partial-call', 'result', 'output-available', etc.
