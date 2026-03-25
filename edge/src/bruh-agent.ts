@@ -465,13 +465,18 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         }),
         execute: async ({ name, url, headers }) => {
           try {
-            const callbackHost = agent.env.HOST?.trim() || 'http://localhost:8790';
-            const options: Record<string, unknown> = { callbackHost };
+            const callbackHost = agent.env.HOST?.trim();
+            const options: Record<string, unknown> = {};
+            if (callbackHost) {
+              options.callbackHost = callbackHost;
+            }
             if (headers && Object.keys(headers).length > 0) {
               options.transport = { headers };
             }
 
+            console.log(`[MCP] addMcpServer("${name}", "${url}", ${JSON.stringify(options)})`);
             const result = await agent.addMcpServer(name, url, options);
+            console.log(`[MCP] addMcpServer result:`, JSON.stringify(result));
 
             if (result.state === 'authenticating') {
               return `🔐 Server "${name}" requires OAuth authorization.\n\nPlease visit this URL to authorize:\n${result.authUrl}\n\nOnce authorized, the server's tools will become available.`;
@@ -479,7 +484,11 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
             return `Connected to MCP server: ${name} (id: ${result.id}). Its tools will be available on the next message.`;
           } catch (e) {
-            return `Failed to connect: ${e instanceof Error ? e.message : e}`;
+            const errMsg = e instanceof Error ? e.message : String(e);
+            const errStack = e instanceof Error ? e.stack : undefined;
+            console.error(`[MCP] addMcpServer failed:`, errMsg);
+            if (errStack) console.error(`[MCP] stack:`, errStack);
+            return `Failed to connect: ${errMsg}`;
           }
         },
       }),
