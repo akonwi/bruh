@@ -128,12 +128,12 @@ Goal: grow from memory-only power into real thread-local workspaces.
 
 Goal: replace the current custom thread/session control plane with **Cloudflare Agents**.
 
-- [ ] Design one Agent instance per thread
-- [ ] Replace `SessionDO` / `SessionIndexDO` responsibilities with Agents
-- [ ] Use base `Agent`, not `AIChatAgent`, for orchestration
-- [ ] Persist thread registry and control-plane state in Agent state / SQLite
-- [ ] Route clients through Agents-compatible endpoints/connections
-- [ ] Keep Pi in Sandbox as the execution engine behind the Agent
+- [x] Design one Agent instance per thread
+- [x] Replace `SessionDO` / `SessionIndexDO` responsibilities with Agents
+- [x] Use base `Agent`, not `AIChatAgent`, for orchestration
+- [x] Persist thread registry and control-plane state in Agent state / SQLite
+- [x] Route clients through Agents-compatible endpoints/connections
+- [x] Keep Pi in runtime as the execution engine behind the Agent
 - [ ] Move scheduling/wakeup semantics onto Agents
 - [ ] Move workflow coordination onto Agents
 
