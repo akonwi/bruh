@@ -115,7 +115,7 @@ Goal: grow from memory-only power into real thread-local workspaces.
   - [x] artifacts/temp dirs
 - [~] Add controlled workspace tools
   - [x] read/search
-  - [ ] bash
+  - [x] bash
   - [x] write/edit
   - [ ] git helpers
 - [ ] Support long-running/background processes when needed

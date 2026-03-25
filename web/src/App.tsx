@@ -246,6 +246,8 @@ function summarizeToolActivity(toolName: string, args?: Record<string, unknown>)
       const threadId = typeof args?.threadId === 'string' ? args.threadId : 'thread'
       return `Reading summary of ${truncateInline(threadId)}`
     }
+    case 'workspace_bash':
+      return `Ran ${truncateInline(typeof args?.command === 'string' ? args.command : 'command')}`
     case 'read':
       return `Opened ${truncateInline(path ?? 'file')}`
     case 'write':

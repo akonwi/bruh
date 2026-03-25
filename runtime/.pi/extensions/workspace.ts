@@ -20,10 +20,13 @@ interface WorkspaceSearchMatch {
   text: string
 }
 
+const MAX_BASH_OUTPUT_CHARS = 50_000
+
 const WORKSPACE_TOOL_GUIDELINES = [
   'Workspace tools operate on the current thread\'s local workspace, not on shared durable memory.',
   'Use workspace tools for thread-local code, scratch files, project files, and artifacts. Use memory tools for durable facts, preferences, notes, and summaries shared across threads.',
   'Paths are relative to the current thread workspace root. Use workspace_list() to discover files before reading or editing unfamiliar paths.',
+  'workspace_bash runs shell commands inside the thread workspace. Use it for builds, scripts, git, and other CLI tasks.',
 ]
 
 function normalizeRelativePath(input: string, allowEmpty = false): string {
@@ -389,6 +392,61 @@ export default function (pi: ExtensionAPI) {
           path: relativePath,
           matches,
           limited: matches.length >= SEARCH_RESULT_LIMIT,
+        },
+      }
+    },
+  })
+
+  pi.registerTool({
+    name: 'workspace_bash',
+    label: 'Workspace Bash',
+    description:
+      'Run a shell command inside the current thread workspace. The command runs with the workspace root as its working directory. Use for builds, scripts, git operations, and other CLI tasks.',
+    promptGuidelines: WORKSPACE_TOOL_GUIDELINES,
+    parameters: Type.Object({
+      command: Type.String({ description: 'Shell command to execute' }),
+      timeout: Type.Optional(
+        Type.Number({ description: 'Timeout in milliseconds. Default is 30000 (30s).' }),
+      ),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const workspaceRoot = getWorkspaceRoot(ctx)
+      const { command, timeout } = params as { command: string; timeout?: number }
+      const trimmedCommand = command.trim()
+      if (!trimmedCommand) {
+        throw new Error('command is required')
+      }
+
+      const result = await pi.exec(trimmedCommand, [], {
+        cwd: workspaceRoot,
+        timeout: timeout ?? 30_000,
+        signal: signal ?? undefined,
+      })
+
+      let output = ''
+      if (result.stdout) {
+        output += result.stdout
+      }
+      if (result.stderr) {
+        output += output ? `\n--- stderr ---\n${result.stderr}` : result.stderr
+      }
+      if (!output) {
+        output = '(no output)'
+      }
+
+      if (output.length > MAX_BASH_OUTPUT_CHARS) {
+        output = `${output.slice(0, MAX_BASH_OUTPUT_CHARS).trimEnd()}\n\n[Output truncated to ${MAX_BASH_OUTPUT_CHARS} characters.]`
+      }
+
+      const exitSummary = result.code === 0 ? '' : `\nExit code: ${result.code}`
+      const killedSummary = result.killed ? '\n(killed by timeout or signal)' : ''
+
+      return {
+        content: [{ type: 'text', text: `${output}${exitSummary}${killedSummary}` }],
+        details: {
+          command: trimmedCommand,
+          exitCode: result.code,
+          killed: result.killed,
         },
       }
     },
