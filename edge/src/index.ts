@@ -1,6 +1,6 @@
 import { cors } from 'hono/cors';
 import { Hono } from 'hono';
-import { getAgentByName } from 'agents';
+import { getAgentByName, routeAgentRequest } from 'agents';
 import { BruhAgent } from './bruh-agent';
 import type { Env, SessionIndexEntry, SessionMetadata } from './session';
 import {
@@ -446,4 +446,15 @@ async function registerThread(env: Env, session: SessionMetadata): Promise<void>
 }
 
 export { BruhAgent };
-export default app;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Handle Agents SDK routes (OAuth callbacks, WebSocket upgrades, etc.)
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse) {
+      return agentResponse;
+    }
+
+    // Fall through to Hono routes
+    return app.fetch(request, env, ctx);
+  },
+};

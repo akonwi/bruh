@@ -61,12 +61,18 @@ export default function (pi: ExtensionAPI) {
       const { name, url } = params as { name: string; url: string }
       const sessionId = getSessionId(ctx)
 
+      const edgeBaseUrl = getEdgeBaseUrl()
+
       const response = await fetch(
-        `${getEdgeBaseUrl()}/internal/sessions/${encodeURIComponent(sessionId)}/mcp/connect`,
+        `${edgeBaseUrl}/internal/sessions/${encodeURIComponent(sessionId)}/mcp/connect`,
         {
           method: 'POST',
           headers: createHeaders(),
-          body: JSON.stringify({ name: name.trim(), url: url.trim() }),
+          body: JSON.stringify({
+            name: name.trim(),
+            url: url.trim(),
+            callbackHost: edgeBaseUrl,
+          }),
         },
       )
 
@@ -75,7 +81,24 @@ export default function (pi: ExtensionAPI) {
         throw new Error(`Failed to connect to MCP server: ${response.status} ${errorBody}`)
       }
 
-      const result = (await response.json()) as { ok: boolean; id: string; state: string }
+      const result = (await response.json()) as {
+        ok: boolean
+        id: string
+        state: string
+        authUrl?: string
+      }
+
+      if (result.state === 'authenticating' && result.authUrl) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `MCP server "${name}" requires authentication.\n\nPlease open this URL to authorize:\n${result.authUrl}\n\nOnce authorized, the server will be ready to use. Run mcp_servers to check the status.`,
+            },
+          ],
+          details: { id: result.id, name, url, state: result.state, authUrl: result.authUrl },
+        }
+      }
 
       return {
         content: [

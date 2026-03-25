@@ -284,6 +284,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     const body = (await request.json().catch(() => ({}))) as {
       name?: string;
       url?: string;
+      callbackHost?: string;
       transport?: { type?: string; headers?: Record<string, string> };
     };
 
@@ -295,6 +296,7 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
 
     try {
       const result = await this.addMcpServer(name, url, {
+        callbackHost: body.callbackHost,
         transport: body.transport as Record<string, unknown> | undefined,
       });
       return Response.json({ ok: true, ...result });
