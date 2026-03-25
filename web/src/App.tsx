@@ -116,7 +116,7 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 
 // --- Chat view using useAgentChat ---
 
-function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; agent: ReturnType<typeof useAgent>; mcpServerNames: Map<string, string> }) {
+function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; agent: any; mcpServerNames: Map<string, string> }) {
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
