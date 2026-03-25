@@ -102,6 +102,16 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
         return this.handleListSchedules();
       case 'POST /cancel-schedule':
         return this.handleCancelSchedule(request);
+      case 'POST /mcp/connect':
+        return this.handleMcpConnect(request);
+      case 'POST /mcp/disconnect':
+        return this.handleMcpDisconnect(request);
+      case 'GET /mcp/servers':
+        return this.handleMcpListServers();
+      case 'GET /mcp/tools':
+        return this.handleMcpListTools();
+      case 'POST /mcp/call':
+        return this.handleMcpCallTool(request);
       default:
         return new Response('Not found', { status: 404 });
     }
@@ -265,6 +275,101 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
 
     if (taskType === 'task') {
       await this.forwardTextCommandToRuntime(this.state.sessionId, 'prompt', message);
+    }
+  }
+
+  // --- MCP client ---
+
+  private async handleMcpConnect(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string;
+      url?: string;
+      transport?: { type?: string; headers?: Record<string, string> };
+    };
+
+    const name = body.name?.trim();
+    const url = body.url?.trim();
+    if (!name || !url) {
+      return Response.json({ error: 'name and url are required' }, { status: 400 });
+    }
+
+    try {
+      const result = await this.addMcpServer(name, url, {
+        transport: body.transport as Record<string, unknown> | undefined,
+      });
+      return Response.json({ ok: true, ...result });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Failed to connect' },
+        { status: 500 },
+      );
+    }
+  }
+
+  private async handleMcpDisconnect(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { name?: string };
+    const name = body.name?.trim();
+    if (!name) {
+      return Response.json({ error: 'name is required' }, { status: 400 });
+    }
+
+    try {
+      await this.removeMcpServer(name);
+      return Response.json({ ok: true, name });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Failed to disconnect' },
+        { status: 500 },
+      );
+    }
+  }
+
+  private handleMcpListServers(): Response {
+    const state = this.getMcpServers();
+    const servers = Object.entries(state.servers).map(([id, server]) => ({
+      id,
+      name: server.name,
+      state: server.state,
+      url: server.server_url,
+    }));
+    return Response.json({ servers });
+  }
+
+  private handleMcpListTools(): Response {
+    const tools = this.mcp.listTools().map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      serverId: tool.serverId,
+      inputSchema: tool.inputSchema,
+    }));
+    return Response.json({ tools });
+  }
+
+  private async handleMcpCallTool(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      serverId?: string;
+      name?: string;
+      arguments?: Record<string, unknown>;
+    };
+
+    const serverId = body.serverId?.trim();
+    const name = body.name?.trim();
+    if (!serverId || !name) {
+      return Response.json({ error: 'serverId and name are required' }, { status: 400 });
+    }
+
+    try {
+      const result = await this.mcp.callTool({
+        serverId,
+        name,
+        arguments: body.arguments ?? {},
+      });
+      return Response.json({ ok: true, result });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Tool call failed' },
+        { status: 500 },
+      );
     }
   }
 

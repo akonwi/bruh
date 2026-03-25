@@ -51,6 +51,24 @@ Session summaries under `sessions/<session-id>/summary.md` are usually maintaine
 
 Do not store sensitive secrets unless the user explicitly asks you to do so.
 
+## MCP (external tool servers)
+
+Bruh can connect to external MCP servers and use their tools dynamically.
+
+Use MCP tools when the user wants to:
+- connect to an external service (GitHub, Slack, databases, etc.)
+- use tools from a remote MCP server
+- discover what tools are available from connected servers
+
+Available tools:
+- `mcp_connect` — connect to an MCP server by name and URL
+- `mcp_disconnect` — disconnect from a server
+- `mcp_servers` — list connected servers
+- `mcp_tools` — list all tools from connected servers
+- `mcp_call` — call a specific tool on a connected server
+
+Always discover tools with `mcp_tools` after connecting before calling them.
+
 ## Scheduling
 
 Bruh can schedule tasks and reminders that fire in the current thread.

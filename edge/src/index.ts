@@ -183,6 +183,56 @@ app.post('/internal/sessions/:sessionId/cancel-schedule', async (c) => {
   }));
 });
 
+app.post('/internal/sessions/:sessionId/mcp/connect', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/mcp/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+});
+
+app.post('/internal/sessions/:sessionId/mcp/disconnect', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/mcp/disconnect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+});
+
+app.get('/internal/sessions/:sessionId/mcp/servers', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/mcp/servers'));
+});
+
+app.get('/internal/sessions/:sessionId/mcp/tools', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/mcp/tools'));
+});
+
+app.post('/internal/sessions/:sessionId/mcp/call', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/mcp/call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+});
+
 app.post('/internal/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();

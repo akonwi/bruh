@@ -240,6 +240,22 @@ function summarizeToolActivity(toolName: string, args?: Record<string, unknown>)
       const target = path || 'workspace/'
       return `Searched for ${truncateInline(`"${query}" in ${target}`)}`
     }
+    case 'mcp_connect': {
+      const serverName = typeof args?.name === 'string' ? args.name : 'server'
+      return `Connecting to ${truncateInline(serverName)}`
+    }
+    case 'mcp_disconnect': {
+      const serverName = typeof args?.name === 'string' ? args.name : 'server'
+      return `Disconnecting from ${truncateInline(serverName)}`
+    }
+    case 'mcp_servers':
+      return 'Checking MCP servers'
+    case 'mcp_tools':
+      return 'Listing MCP tools'
+    case 'mcp_call': {
+      const toolName = typeof args?.name === 'string' ? args.name : 'tool'
+      return `Calling ${truncateInline(toolName)}`
+    }
     case 'schedule_set':
       return `Scheduling ${truncateInline(typeof args?.message === 'string' ? args.message : 'reminder')}`
     case 'schedule_list':
