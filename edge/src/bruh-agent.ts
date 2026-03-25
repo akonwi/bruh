@@ -1,5 +1,5 @@
 import { AIChatAgent, type OnChatMessageOptions } from '@cloudflare/ai-chat';
-import { streamText, convertToModelMessages, stepCountIs, type StreamTextOnFinishCallback, type ToolSet, tool, jsonSchema } from 'ai';
+import { streamText, generateText, convertToModelMessages, stepCountIs, type StreamTextOnFinishCallback, type ToolSet, tool, jsonSchema } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { getAgentByName } from 'agents';
@@ -68,7 +68,7 @@ All threads share the same memory.
 - Use \`memory_append\` for dated notes, \`memory_write\` for new files, \`memory_edit\` for precise updates.
 
 ## Scheduling
-You can schedule tasks and reminders. Tasks auto-prompt you at the scheduled time. Reminders just notify.
+You can schedule one-time or recurring tasks. Each scheduled task is a prompt that you (the agent) execute at the scheduled time. The result appears in the message transcript so the user can see what happened. Use schedule_once for one-time tasks and schedule_recurring for repeated tasks.
 
 ## Threads
 You run as the main thread or a side thread. Use thread tools to list and read summaries of other threads.
@@ -309,40 +309,59 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
       // --- Scheduling tools ---
 
-      schedule_set: createTool<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
-        description: 'Schedule a task or reminder. "task" auto-prompts the agent at the time. "reminder" just logs an event.',
-        parameters: jsonSchema<{ message: string; delaySeconds?: number; scheduledAt?: string; taskType?: 'task' | 'reminder' }>({
+      schedule_once: createTool<{ prompt: string; delaySeconds?: number; scheduledAt?: string }>({
+        description: 'Schedule a one-time task. The agent will be prompted with the message at the scheduled time. The result appears in the transcript.',
+        parameters: jsonSchema<{ prompt: string; delaySeconds?: number; scheduledAt?: string }>({
           type: 'object',
           properties: {
-            message: { type: 'string', description: 'Message to deliver at the scheduled time' },
+            prompt: { type: 'string', description: 'Prompt the agent will execute at the scheduled time' },
             delaySeconds: { type: 'number', description: 'Delay in seconds from now' },
             scheduledAt: { type: 'string', description: 'ISO 8601 datetime to fire at' },
-            taskType: { type: 'string', enum: ['task', 'reminder'], description: '"task" auto-prompts, "reminder" just notifies' },
           },
-          required: ['message'],
+          required: ['prompt'],
         }),
-        execute: async ({ message, delaySeconds, scheduledAt, taskType }) => {
+        execute: async ({ prompt, delaySeconds, scheduledAt }) => {
           const when = scheduledAt
             ? new Date(scheduledAt)
             : delaySeconds && delaySeconds > 0
               ? delaySeconds
               : null;
-          if (!when) return 'Error: delaySeconds or scheduledAt is required';
-          const payload = JSON.stringify({ message, taskType: taskType || 'task' });
+          if (!when) return 'Error: provide delaySeconds or scheduledAt';
+          const payload = JSON.stringify({ prompt });
           const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
-          return `Scheduled "${message}" (${schedule.type}, id: ${schedule.id})`;
+          return `Scheduled one-time task (id: ${schedule.id}): "${prompt}"`;
+        },
+      }),
+
+      schedule_recurring: createTool<{ prompt: string; intervalSeconds: number }>({
+        description: 'Schedule a recurring task. The agent will be prompted repeatedly at the given interval. The result appears in the transcript each time.',
+        parameters: jsonSchema<{ prompt: string; intervalSeconds: number }>({
+          type: 'object',
+          properties: {
+            prompt: { type: 'string', description: 'Prompt the agent will execute each interval' },
+            intervalSeconds: { type: 'number', description: 'Seconds between each execution' },
+          },
+          required: ['prompt', 'intervalSeconds'],
+        }),
+        execute: async ({ prompt, intervalSeconds }) => {
+          if (intervalSeconds < 10) return 'Error: intervalSeconds must be at least 10';
+          const payload = JSON.stringify({ prompt });
+          const schedule = await agent.scheduleEvery(intervalSeconds, 'executeScheduledTask', payload);
+          return `Scheduled recurring task every ${intervalSeconds}s (id: ${schedule.id}): "${prompt}"`;
         },
       }),
 
       schedule_list: createTool<Record<string, never>>({
-        description: 'List all active scheduled tasks and reminders.',
+        description: 'List all active scheduled tasks.',
         parameters: jsonSchema<Record<string, never>>({ type: 'object', properties: {} }),
         execute: async () => {
           const schedules = agent.getSchedules();
           if (schedules.length === 0) return 'No active schedules.';
           return schedules.map((s) => {
             const time = s.time ? new Date(s.time).toISOString() : 'recurring';
-            return `${s.id}: ${s.callback} at ${time}`;
+            const payload = typeof s.payload === 'string' ? JSON.parse(s.payload) : s.payload;
+            const prompt = payload?.prompt || '(unknown)';
+            return `${s.id} [${s.type}] at ${time}: "${prompt}"`;
           }).join('\n');
         },
       }),
@@ -554,23 +573,63 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   // --- Scheduled task execution ---
 
   async executeScheduledTask(rawPayload: string): Promise<void> {
-    let message: string;
-    let taskType: 'task' | 'reminder';
-
+    let prompt: string;
     try {
-      const parsed = JSON.parse(rawPayload) as { message?: string; taskType?: string };
-      message = parsed.message || rawPayload;
-      taskType = parsed.taskType === 'reminder' ? 'reminder' : 'task';
+      const parsed = JSON.parse(rawPayload) as { prompt?: string; message?: string };
+      prompt = parsed.prompt || parsed.message || rawPayload;
     } catch {
-      message = rawPayload;
-      taskType = 'task';
+      prompt = rawPayload;
     }
 
-    await this.appendEvent('schedule.fired', {
-      message,
-      taskType,
-      firedAt: new Date().toISOString(),
-    });
+    console.log(`[BruhAgent] Executing scheduled task: "${prompt}"`);
+
+    // Add a system message indicating the scheduled task fired
+    const scheduledUserMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: `[Scheduled task] ${prompt}` }],
+      createdAt: new Date(),
+    };
+    this.messages.push(scheduledUserMessage);
+
+    try {
+      // Run the agent loop to completion (no streaming — there's no client connected)
+      const model = this.getModel();
+      const tools = this.getTools();
+      const modelMessages = await convertToModelMessages(this.messages);
+
+      const result = await generateText({
+        model,
+        messages: modelMessages,
+        system: SYSTEM_PROMPT,
+        tools,
+        stopWhen: stepCountIs(10),
+      });
+
+      // Add the assistant response to the transcript
+      const assistantMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        parts: [{ type: 'text' as const, text: result.text || '(no response)' }],
+        createdAt: new Date(),
+      };
+      this.messages.push(assistantMessage);
+      await this.saveMessages(this.messages);
+
+      console.log(`[BruhAgent] Scheduled task completed: ${result.text?.length ?? 0} chars`);
+    } catch (error) {
+      console.error('[BruhAgent] Scheduled task failed:', error);
+
+      // Add error message to transcript so user is aware
+      const errorMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        parts: [{ type: 'text' as const, text: `⚠️ Scheduled task failed: ${error instanceof Error ? error.message : 'unknown error'}` }],
+        createdAt: new Date(),
+      };
+      this.messages.push(errorMessage);
+      await this.saveMessages(this.messages);
+    }
   }
 
   // --- Custom request handling ---
