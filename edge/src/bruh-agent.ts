@@ -583,17 +583,9 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     console.log(`[BruhAgent] Executing scheduled task: "${prompt}"`);
 
-    // Add a system message indicating the scheduled task fired
-    const scheduledUserMessage = {
-      id: crypto.randomUUID(),
-      role: 'user' as const,
-      parts: [{ type: 'text' as const, text: `[Scheduled task] ${prompt}` }],
-      createdAt: new Date(),
-    };
-    this.messages.push(scheduledUserMessage);
-
     try {
-      // Run the agent loop to completion (no streaming — there's no client connected)
+      // Run as an ephemeral agent call — the conversation history provides context
+      // but the scheduled prompt is injected as a system instruction, not a user message
       const model = this.getModel();
       const tools = this.getTools();
       const modelMessages = await convertToModelMessages(this.messages);
@@ -601,16 +593,16 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       const result = await generateText({
         model,
         messages: modelMessages,
-        system: SYSTEM_PROMPT,
+        system: `${SYSTEM_PROMPT}\n\n## Active scheduled task\nYou have a scheduled task firing now. Execute it and report the result concisely to the user.\n\nTask: ${prompt}`,
         tools,
         stopWhen: stepCountIs(10),
       });
 
-      // Add the assistant response to the transcript
+      // Only add the assistant's response to the transcript
       const assistantMessage = {
         id: crypto.randomUUID(),
         role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: result.text || '(no response)' }],
+        parts: [{ type: 'text' as const, text: `⏰ ${result.text || '(scheduled task completed)'}` }],
         createdAt: new Date(),
       };
       this.messages.push(assistantMessage);
@@ -620,7 +612,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     } catch (error) {
       console.error('[BruhAgent] Scheduled task failed:', error);
 
-      // Add error message to transcript so user is aware
       const errorMessage = {
         id: crypto.randomUUID(),
         role: 'assistant' as const,
