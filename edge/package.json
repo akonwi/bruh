@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "agents": "^0.8.2",
     "hono": "^4.10.6"
   },
   "devDependencies": {

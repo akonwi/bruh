@@ -1,7 +1,7 @@
 import { cors } from 'hono/cors';
 import { Hono } from 'hono';
-import { SessionIndexDO } from './session-index-do';
-import { SessionDO } from './session-do';
+import { getAgentByName } from 'agents';
+import { BruhAgent } from './bruh-agent';
 import type { Env, SessionIndexEntry, SessionMetadata } from './session';
 import {
   buildStorageListPayload,
@@ -12,6 +12,7 @@ import {
 
 const app = new Hono<{ Bindings: Env }>();
 const MAIN_SESSION_ID = 'main';
+const REGISTRY_AGENT_NAME = '__registry__';
 
 app.use('*', cors({
   origin: '*',
@@ -39,8 +40,9 @@ app.get('/health', (c) => {
 });
 
 app.post('/sessions', async (c) => {
-  const session = await initSession(c.env, crypto.randomUUID());
-  await registerSession(c.env, session);
+  const sessionId = crypto.randomUUID();
+  const session = await initSession(c.env, sessionId);
+  await registerThread(c.env, session);
   return c.json(session);
 });
 
@@ -50,7 +52,8 @@ app.get('/main-session', async (c) => {
 });
 
 app.get('/sessions', async (c) => {
-  const response = await getSessionIndexStub(c.env).fetch('https://session-index/sessions');
+  const registryStub = await getAgentByName(c.env.BRUH_AGENT, REGISTRY_AGENT_NAME);
+  const response = await registryStub.fetch(new Request('https://agent/threads'));
   if (!response.ok) {
     return response;
   }
@@ -61,12 +64,11 @@ app.get('/sessions', async (c) => {
       entries
         .filter(({ sessionId }) => sessionId !== MAIN_SESSION_ID)
         .map(async ({ sessionId }) => {
-        const sessionResponse = await getSessionStub(c.env, sessionId).fetch('https://session/state');
-        if (!sessionResponse.ok) {
-          return null;
-        }
-        return (await sessionResponse.json()) as SessionMetadata;
-      }),
+          const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+          const stateResponse = await stub.fetch(new Request('https://agent/state'));
+          if (!stateResponse.ok) return null;
+          return (await stateResponse.json()) as SessionMetadata;
+        }),
     )
   )
     .filter((session): session is SessionMetadata => session !== null)
@@ -76,24 +78,26 @@ app.get('/sessions', async (c) => {
 });
 
 app.get('/sessions/:sessionId', async (c) => {
-  const session = await initSession(c.env, c.req.param('sessionId'));
-  await registerSession(c.env, session);
+  const sessionId = c.req.param('sessionId');
+  const session = await initSession(c.env, sessionId);
+  await registerThread(c.env, session);
   return c.json(session);
 });
 
 app.get('/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const after = c.req.query('after');
-  const targetUrl = new URL('https://session/events');
+  const targetUrl = new URL('https://agent/events');
   if (after) targetUrl.searchParams.set('after', after);
 
-  return getSessionStub(c.env, sessionId).fetch(targetUrl.toString(), { method: 'GET' });
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+  return stub.fetch(targetUrl.toString(), { method: 'GET' });
 });
 
 app.get('/sessions/:sessionId/stream', async (c) => {
   const sessionId = c.req.param('sessionId');
   const after = c.req.query('after');
-  const targetUrl = new URL('https://session/stream');
+  const targetUrl = new URL('https://agent/stream');
   if (after) targetUrl.searchParams.set('after', after);
 
   const request = new Request(targetUrl.toString(), {
@@ -101,59 +105,66 @@ app.get('/sessions/:sessionId/stream', async (c) => {
     headers: c.req.raw.headers,
   });
 
-  return getSessionStub(c.env, sessionId).fetch(request);
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+  return stub.fetch(request);
 });
 
 app.post('/sessions/:sessionId/prompt', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
 
-  return getSessionStub(c.env, sessionId).fetch('https://session/prompt', {
+  return stub.fetch(new Request('https://agent/prompt', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
     body,
-  });
+  }));
 });
 
 app.post('/sessions/:sessionId/steer', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
 
-  return getSessionStub(c.env, sessionId).fetch('https://session/steer', {
+  return stub.fetch(new Request('https://agent/steer', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
     body,
-  });
+  }));
 });
 
 app.post('/sessions/:sessionId/follow-up', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
 
-  return getSessionStub(c.env, sessionId).fetch('https://session/follow-up', {
+  return stub.fetch(new Request('https://agent/follow-up', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
     body,
-  });
+  }));
 });
 
 app.post('/sessions/:sessionId/abort', async (c) => {
   const sessionId = c.req.param('sessionId');
-  return getSessionStub(c.env, sessionId).fetch('https://session/abort', {
-    method: 'POST',
-  });
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/abort', { method: 'POST' }));
 });
 
 app.post('/internal/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
 
-  return getSessionStub(c.env, sessionId).fetch('https://session/events', {
+  return stub.fetch(new Request('https://agent/events', {
     method: 'POST',
     headers: { 'Content-Type': c.req.header('content-type') ?? 'application/json' },
     body,
-  });
+  }));
 });
+
+// --- R2 storage routes (unchanged) ---
 
 app.get('/internal/storage/object', async (c) => {
   try {
@@ -294,7 +305,7 @@ app.get('/', (c) => {
   return c.json({
     ok: true,
     service: 'edge',
-    message: 'Bruh edge worker scaffold is up.',
+    message: 'Bruh edge worker with Agents.',
     routes: {
       createSession: 'POST /sessions',
       getMainSession: 'GET /main-session',
@@ -314,17 +325,15 @@ app.get('/', (c) => {
   });
 });
 
-function getSessionStub(env: Env, sessionId: string): DurableObjectStub {
-  const id = env.SESSION_DO.idFromName(sessionId);
-  return env.SESSION_DO.get(id);
-}
+// --- Agent helpers ---
 
 async function initSession(env: Env, sessionId: string, title?: string): Promise<SessionMetadata> {
-  const response = await getSessionStub(env, sessionId).fetch('https://session/init', {
+  const stub = await getAgentByName(env.BRUH_AGENT, sessionId);
+  const response = await stub.fetch(new Request('https://agent/init', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, title }),
-  });
+  }));
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -334,30 +343,26 @@ async function initSession(env: Env, sessionId: string, title?: string): Promise
   return (await response.json()) as SessionMetadata;
 }
 
-function getSessionIndexStub(env: Env): DurableObjectStub {
-  const id = env.SESSION_INDEX_DO.idFromName('sessions');
-  return env.SESSION_INDEX_DO.get(id);
-}
-
-async function registerSession(env: Env, session: SessionMetadata): Promise<void> {
+async function registerThread(env: Env, session: SessionMetadata): Promise<void> {
   if (session.sessionId === MAIN_SESSION_ID) {
     return;
   }
 
-  const response = await getSessionIndexStub(env).fetch('https://session-index/register', {
+  const registryStub = await getAgentByName(env.BRUH_AGENT, REGISTRY_AGENT_NAME);
+  const response = await registryStub.fetch(new Request('https://agent/register-thread', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       sessionId: session.sessionId,
       createdAt: session.createdAt,
     }),
-  });
+  }));
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Failed to register session index entry: ${response.status} ${body}`.trim());
+    throw new Error(`Failed to register thread: ${response.status} ${body}`.trim());
   }
 }
 
-export { SessionDO, SessionIndexDO };
+export { BruhAgent };
 export default app;

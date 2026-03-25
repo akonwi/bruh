@@ -2,19 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bruh-edge",
   "main": "src/index.ts",
-  "compatibility_date": "2026-03-23",
+  "compatibility_date": "2026-03-24",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
   },
   "durable_objects": {
     "bindings": [
       {
-        "name": "SESSION_DO",
-        "class_name": "SessionDO"
-      },
-      {
-        "name": "SESSION_INDEX_DO",
-        "class_name": "SessionIndexDO"
+        "name": "BRUH_AGENT",
+        "class_name": "BruhAgent"
       }
     ]
   },
@@ -33,6 +30,11 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["SessionIndexDO"]
+    },
+    {
+      "tag": "v3",
+      "deleted_classes": ["SessionDO", "SessionIndexDO"],
+      "new_sqlite_classes": ["BruhAgent"]
     }
   ]
 }

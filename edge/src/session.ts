@@ -26,9 +26,10 @@ export interface SessionIndexEntry {
   createdAt: string;
 }
 
+import type { BruhAgent } from './bruh-agent';
+
 export interface Env {
-  SESSION_DO: DurableObjectNamespace;
-  SESSION_INDEX_DO: DurableObjectNamespace;
+  BRUH_AGENT: DurableObjectNamespace<BruhAgent>;
   MEMORY_BUCKET: R2Bucket;
   RUNTIME_BASE_URL?: string;
   INTERNAL_API_SECRET?: string;
