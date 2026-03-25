@@ -91,7 +91,9 @@ function formatMessageTime(timestamp: string | Date | undefined): string {
 }
 
 function formatToolName(toolName: string): string {
-  return toolName.replaceAll('_', ' ')
+  // MCP tools are namespaced as "{serverId}_{toolName}" — strip the ID prefix
+  const stripped = toolName.replace(/^[A-Za-z0-9]{8}_/, '')
+  return stripped.replaceAll('_', ' ')
 }
 
 function truncateInline(value: string, maxLength = 72): string {
@@ -296,7 +298,9 @@ function MessageItem({ message }: { message: UIMessage }) {
 
 function ToolPart({ part }: { part: any }) {
   // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
-  const toolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
+  const rawToolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
+  // Strip MCP server ID prefix (e.g. "GWEakO7V_search_repositories" → "search_repositories")
+  const toolName = rawToolName.replace(/^[A-Za-z0-9]{8}_/, '')
 
   // AI SDK v6: states are 'call', 'partial-call', 'result', 'output-available', etc.
   // Properties: input (not args), output (not result)
