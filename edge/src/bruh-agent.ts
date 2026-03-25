@@ -240,8 +240,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   // --- Sandbox ---
 
   private getSandbox() {
+    // Use short, stable IDs — long UUIDs cause Docker container naming issues locally
     const sessionId = this.state.sessionId || this.name || 'main';
-    return getSandbox(this.env.SANDBOX, `session-${sessionId}`);
+    const shortId = sessionId === 'main' ? 'main' : sessionId.slice(0, 8);
+    return getSandbox(this.env.SANDBOX, shortId);
   }
 
   // --- Model provider selection ---
