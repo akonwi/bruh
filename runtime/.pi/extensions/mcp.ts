@@ -88,7 +88,7 @@ export default function (pi: ExtensionAPI) {
         authUrl?: string
       }
 
-      if (result.state === 'authenticating' && result.authUrl) {
+      if (result.authUrl) {
         return {
           content: [
             {
@@ -97,6 +97,18 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: { id: result.id, name, url, state: result.state, authUrl: result.authUrl },
+        }
+      }
+
+      if (result.state === 'authenticating') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `MCP server "${name}" requires authentication but the auth URL was not returned. This can happen if the initial connection timed out. Try disconnecting with mcp_disconnect and reconnecting.`,
+            },
+          ],
+          details: { id: result.id, name, url, state: result.state },
         }
       }
 
