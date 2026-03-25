@@ -4,7 +4,35 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { getAgentByName } from 'agents';
 import { getSandbox, type Sandbox } from '@cloudflare/sandbox';
+import type { UIMessage } from 'ai';
 import type { SessionEventEnvelope, SessionMetadata } from './session';
+
+/**
+ * Remove assistant messages that have tool calls without matching tool results.
+ * This prevents MissingToolResultsError when a tool call failed mid-turn
+ * (e.g. sandbox container error) and the incomplete state was persisted.
+ */
+function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
+  return messages.map((msg) => {
+    if (msg.role !== 'assistant' || !msg.parts) return msg;
+
+    const hasToolCall = msg.parts.some((p: any) =>
+      typeof p.type === 'string' && p.type.startsWith('tool-') && (p.state === 'call' || p.state === 'partial-call')
+    );
+
+    if (!hasToolCall) return msg;
+
+    // Strip incomplete tool invocations (call without result)
+    const cleanParts = msg.parts.filter((p: any) => {
+      if (typeof p.type === 'string' && p.type.startsWith('tool-')) {
+        return p.state === 'result' || p.state === 'output-available';
+      }
+      return true;
+    });
+
+    return { ...msg, parts: cleanParts };
+  }).filter((msg) => msg.parts == null || msg.parts.length > 0);
+}
 
 // --- Helper: typed tool creation (works around AI SDK v6 overload issues) ---
 function createTool<T>(config: {
@@ -727,7 +755,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       }
     }
 
-    const modelMessages = await convertToModelMessages(this.messages);
+    const modelMessages = await convertToModelMessages(sanitizeMessages(this.messages));
 
     // Wrap onFinish to auto-write session summary
     const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (event) => {
@@ -891,7 +919,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     const model = this.getModel();
     const mcpTools = this.mcp.getAITools();
     const tools = { ...this.getTools(), ...mcpTools };
-    const modelMessages = await convertToModelMessages(this.messages);
+    const modelMessages = await convertToModelMessages(sanitizeMessages(this.messages));
 
     const result = streamText({
       model,
