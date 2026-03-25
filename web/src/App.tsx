@@ -169,7 +169,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
 
           <div className='border bg-card shadow-sm'>
             <textarea
-              value={input}
+              value={input ?? ''}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={sessionId === MAIN_SESSION_ID ? 'Message Main…' : 'Message this thread…'}
@@ -185,7 +185,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
                   Stop
                 </Button>
               ) : (
-                <Button onClick={() => handleSubmit()} disabled={!input.trim()}>
+                <Button onClick={() => handleSubmit()} disabled={!input?.trim()}>
                   <ArrowSquareOut data-icon='inline-start' />
                   Send
                 </Button>
