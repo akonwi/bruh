@@ -286,9 +286,12 @@ function MessageItem({ message }: { message: UIMessage }) {
 function ToolPart({ part }: { part: any }) {
   // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
   const toolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
+
+  // AI SDK v6: states are 'call', 'partial-call', 'result', 'output-available', etc.
+  // Properties: input (not args), output (not result)
   const isRunning = part.state === 'call' || part.state === 'partial-call'
-  const isError = part.state === 'result' && typeof part.result === 'string' && part.result.startsWith('Error:')
-  const isDone = part.state === 'result'
+  const isDone = part.state === 'result' || part.state === 'output-available'
+  const isError = isDone && typeof (part.output ?? part.result) === 'string' && (part.output ?? part.result)?.startsWith('Error:')
 
   const panelTone = isRunning
     ? 'border-border bg-muted/35'
@@ -302,9 +305,12 @@ function ToolPart({ part }: { part: any }) {
       ? 'text-destructive'
       : 'text-emerald-600 dark:text-emerald-300'
 
-  const resultText = isDone && part.result != null
-    ? typeof part.result === 'string' ? part.result : JSON.stringify(part.result, null, 2)
+  const rawOutput = part.output ?? part.result
+  const resultText = isDone && rawOutput != null
+    ? typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
     : null
+
+  const rawInput = part.input ?? part.args
 
   return (
     <div className='flex justify-start'>
@@ -331,9 +337,9 @@ function ToolPart({ part }: { part: any }) {
           </div>
           {resultText ? (
             <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>{resultText}</pre>
-          ) : part.args ? (
+          ) : rawInput ? (
             <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground'>
-              {JSON.stringify(part.args, null, 2)}
+              {typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2)}
             </pre>
           ) : (
             <p className='text-muted-foreground'>{isRunning ? 'Running…' : 'No output'}</p>
