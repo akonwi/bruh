@@ -27,9 +27,11 @@ export interface SessionIndexEntry {
 }
 
 import type { BruhAgent } from './bruh-agent';
+import type { Sandbox } from '@cloudflare/sandbox';
 
 export interface Env {
   BRUH_AGENT: DurableObjectNamespace<BruhAgent>;
+  SANDBOX: DurableObjectNamespace<Sandbox>;
   MEMORY_BUCKET: R2Bucket;
   ASSETS?: Fetcher;
   ANTHROPIC_API_KEY?: string;

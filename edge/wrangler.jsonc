@@ -18,9 +18,21 @@
       {
         "name": "BRUH_AGENT",
         "class_name": "BruhAgent"
+      },
+      {
+        "name": "SANDBOX",
+        "class_name": "Sandbox"
       }
     ]
   },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "ghcr.io/cloudflare/sandbox:latest",
+      "instance_type": "lite",
+      "max_instances": 5
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "MEMORY_BUCKET",
@@ -41,6 +53,10 @@
       "tag": "v3",
       "deleted_classes": ["SessionDO", "SessionIndexDO"],
       "new_sqlite_classes": ["BruhAgent"]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["Sandbox"]
     }
   ]
 }

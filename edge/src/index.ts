@@ -2,6 +2,7 @@ import { cors } from 'hono/cors';
 import { Hono } from 'hono';
 import { getAgentByName, routeAgentRequest } from 'agents';
 import { BruhAgent } from './bruh-agent';
+export { Sandbox } from '@cloudflare/sandbox';
 import type { SessionIndexEntry, SessionMetadata, Env } from './session';
 import {
   buildStorageListPayload,

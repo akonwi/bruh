@@ -3,6 +3,7 @@ import { streamText, generateText, convertToModelMessages, stepCountIs, type Str
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { getAgentByName } from 'agents';
+import { getSandbox, type Sandbox } from '@cloudflare/sandbox';
 import type { SessionEventEnvelope, SessionMetadata } from './session';
 
 // --- Helper: typed tool creation (works around AI SDK v6 overload issues) ---
@@ -18,6 +19,7 @@ function createTool<T>(config: {
 
 interface BruhEnv {
   BRUH_AGENT: DurableObjectNamespace;
+  SANDBOX: DurableObjectNamespace<Sandbox>;
   MEMORY_BUCKET: R2Bucket;
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
@@ -75,6 +77,14 @@ You can schedule one-time or recurring tasks. Each scheduled task is a prompt th
 
 ## Threads
 You run as the main thread or a side thread. Use thread tools to list and read summaries of other threads.
+
+## Sandbox
+You have access to an isolated sandbox container with a full Linux environment. It has bash, git, python3, node, and common tools.
+- Use sandbox_exec for shell commands (git clone, python scripts, installs, etc.)
+- Use sandbox_read/write for file operations in the sandbox
+- Use sandbox_git_clone to clone repositories
+- The sandbox filesystem persists across tool calls within the same session
+- The sandbox working directory is /workspace
 
 ## MCP
 You can connect to external MCP servers for additional tools. Use mcp_servers to check what's connected.
@@ -225,6 +235,13 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         console.error(`[BruhAgent] Failed to connect MCP server ${config.name}:`, error instanceof Error ? error.message : error);
       }
     }
+  }
+
+  // --- Sandbox ---
+
+  private getSandbox() {
+    const sessionId = this.state.sessionId || this.name || 'main';
+    return getSandbox(this.env.SANDBOX, `session-${sessionId}`);
   }
 
   // --- Model provider selection ---
@@ -579,6 +596,106 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
       // Note: MCP tools from connected servers are automatically available to the model
       // via this.mcp.getAITools() — no need for a manual mcp_call wrapper.
+
+      // --- Sandbox tools (code execution, filesystem, git) ---
+
+      sandbox_exec: createTool<{ command: string; cwd?: string; timeout?: number }>({
+        description: 'Execute a shell command in an isolated sandbox container. Has bash, git, python3, node, and common CLI tools. The sandbox filesystem persists across calls within the same session.',
+        parameters: jsonSchema<{ command: string; cwd?: string; timeout?: number }>({
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Shell command to execute' },
+            cwd: { type: 'string', description: 'Working directory (default: /workspace)' },
+            timeout: { type: 'number', description: 'Timeout in milliseconds (default: 30000)' },
+          },
+          required: ['command'],
+        }),
+        execute: async ({ command, cwd, timeout }) => {
+          const sandbox = agent.getSandbox();
+          const result = await sandbox.exec(command, {
+            cwd: cwd || '/workspace',
+            timeout: timeout || 30_000,
+          });
+          const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
+          if (!result.success) {
+            return `Exit code ${result.exitCode}\n${output}`.trim();
+          }
+          return output || '(no output)';
+        },
+      }),
+
+      sandbox_read: createTool<{ path: string }>({
+        description: 'Read a file from the sandbox filesystem.',
+        parameters: jsonSchema<{ path: string }>({
+          type: 'object',
+          properties: { path: { type: 'string', description: 'Absolute path in the sandbox' } },
+          required: ['path'],
+        }),
+        execute: async ({ path }) => {
+          const sandbox = agent.getSandbox();
+          const result = await sandbox.readFile(path);
+          return result.content;
+        },
+      }),
+
+      sandbox_write: createTool<{ path: string; content: string }>({
+        description: 'Write a file to the sandbox filesystem. Creates parent directories automatically.',
+        parameters: jsonSchema<{ path: string; content: string }>({
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Absolute path in the sandbox' },
+            content: { type: 'string', description: 'File content to write' },
+          },
+          required: ['path', 'content'],
+        }),
+        execute: async ({ path, content }) => {
+          const sandbox = agent.getSandbox();
+          // Ensure parent directory exists
+          const dir = path.substring(0, path.lastIndexOf('/'));
+          if (dir) await sandbox.mkdir(dir, { recursive: true }).catch(() => {});
+          await sandbox.writeFile(path, content);
+          return `Written: ${path} (${content.length} bytes)`;
+        },
+      }),
+
+      sandbox_list: createTool<{ path: string }>({
+        description: 'List files and directories in the sandbox filesystem.',
+        parameters: jsonSchema<{ path: string }>({
+          type: 'object',
+          properties: { path: { type: 'string', description: 'Directory path to list (default: /workspace)' } },
+          required: ['path'],
+        }),
+        execute: async ({ path }) => {
+          const sandbox = agent.getSandbox();
+          const result = await sandbox.listFiles(path || '/workspace');
+          if (!result.files?.length) return 'Empty directory.';
+          return result.files
+            .map((f: any) => `${f.type === 'directory' ? 'd' : '-'} ${f.name}${f.size != null ? ` (${f.size} bytes)` : ''}`)
+            .join('\n');
+        },
+      }),
+
+      sandbox_git_clone: createTool<{ url: string; branch?: string; targetDir?: string }>({
+        description: 'Clone a git repository into the sandbox. Defaults to /workspace/<repo-name>.',
+        parameters: jsonSchema<{ url: string; branch?: string; targetDir?: string }>({
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Git repository URL' },
+            branch: { type: 'string', description: 'Branch to checkout (default: default branch)' },
+            targetDir: { type: 'string', description: 'Target directory (default: /workspace/<repo-name>)' },
+          },
+          required: ['url'],
+        }),
+        execute: async ({ url, branch, targetDir }) => {
+          const sandbox = agent.getSandbox();
+          const result = await sandbox.gitCheckout(url, {
+            branch,
+            targetDir: targetDir || undefined,
+            depth: 1,
+          });
+          return `Cloned ${url}${branch ? ` (branch: ${branch})` : ''} to ${result.targetDir ?? targetDir ?? '/workspace'}`;
+        },
+      }),
     };
   }
 
