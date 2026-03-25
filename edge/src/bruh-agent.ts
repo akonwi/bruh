@@ -295,10 +295,16 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
     }
 
     try {
-      const result = await this.addMcpServer(name, url, {
+      const connectPromise = this.addMcpServer(name, url, {
         callbackHost: body.callbackHost,
         transport: body.transport as Record<string, unknown> | undefined,
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('MCP connection timed out after 30s')), 30_000),
+      );
+
+      const result = await Promise.race([connectPromise, timeoutPromise]);
       return Response.json({ ok: true, ...result });
     } catch (error) {
       return Response.json(
