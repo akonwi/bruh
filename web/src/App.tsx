@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { useAgent } from 'agents/react'
 import { useAgentChat } from '@cloudflare/ai-chat/react'
 import type { UIMessage } from 'ai'
@@ -31,6 +31,18 @@ import {
 } from '@/lib/api'
 
 const MAIN_SESSION_ID = 'main'
+
+interface McpServerInfo {
+  name: string;
+  state: string;
+  server_url: string;
+  error: string | null;
+}
+
+interface McpState {
+  servers: Record<string, McpServerInfo>;
+  tools: Array<{ name: string; serverId: string }>;
+}
 
 type AppRoute =
   | { kind: 'main' }
@@ -95,8 +107,7 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 
 // --- Chat view using useAgentChat ---
 
-function ChatView({ sessionId }: { sessionId: string }) {
-  const agent = useAgent({ agent: 'BruhAgent', name: sessionId })
+function ChatView({ sessionId, agent }: { sessionId: string; agent: ReturnType<typeof useAgent> }) {
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
@@ -420,6 +431,16 @@ function App() {
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const activeTitle = route.kind === 'main' ? 'Main' : route.kind === 'threads' ? 'Threads' : `Thread ${shortId(route.sessionId)}`
 
+  // Agent connection — lives here so MCP state is available to sidebar
+  const [mcpState, setMcpState] = useState<McpState>({ servers: {}, tools: [] })
+  const agent = useAgent({
+    agent: 'BruhAgent',
+    name: sessionId ?? MAIN_SESSION_ID,
+    onMcpUpdate: (state) => setMcpState(state as McpState),
+  })
+
+  const mcpServers = useMemo(() => Object.values(mcpState.servers), [mcpState.servers])
+
   return (
     <SidebarProvider className='h-svh max-h-svh overflow-hidden'>
       <AppSidebar
@@ -428,6 +449,8 @@ function App() {
         onNavigateThreads={handleNavigateThreads}
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
+        mcpServers={mcpServers}
+        mcpToolCount={mcpState.tools.length}
       />
       <SidebarInset className='h-svh min-h-0 max-h-svh overflow-hidden'>
         <header className='sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur'>
@@ -439,7 +462,7 @@ function App() {
         </header>
 
         {sessionId ? (
-          <ChatView sessionId={sessionId} />
+          <ChatView sessionId={sessionId} agent={agent} />
         ) : (
           <ThreadList
             sessions={sessions}
