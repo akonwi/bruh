@@ -2,21 +2,18 @@
   "name": "bruh",
   "private": true,
   "packageManager": "bun@1.3.10",
-  "workspaces": ["edge", "runtime", "web"],
+  "workspaces": ["edge", "web"],
   "scripts": {
+    "dev": "bun run dev:edge & bun run dev:web",
     "dev:web": "cd web && bun run dev",
-    "dev:runtime": "cd runtime && bun run dev",
-    "dev:runtime:local": "cd runtime && bun run dev:local",
     "dev:edge": "cd edge && bun run dev",
-    "build": "bun run build:web && bun run build:runtime && bun run build:edge",
+    "build": "bun run build:web && bun run build:edge",
     "predeploy:edge": "bun run build:web && rm -rf edge/public && cp -r web/dist edge/public",
     "deploy:edge": "bun run predeploy:edge && cd edge && npx wrangler deploy",
     "build:web": "cd web && bun run build",
-    "build:runtime": "cd runtime && bun run build",
     "build:edge": "cd edge && bun run build",
-    "typecheck": "bun run typecheck:web && bun run typecheck:runtime && bun run typecheck:edge",
+    "typecheck": "bun run typecheck:web && bun run typecheck:edge",
     "typecheck:web": "cd web && bun run typecheck",
-    "typecheck:runtime": "cd runtime && bun run typecheck",
     "typecheck:edge": "cd edge && bun run typecheck"
   }
 }
