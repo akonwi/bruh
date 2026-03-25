@@ -1,0 +1,8 @@
+# MCP server API keys / tokens
+# Copy this file to .dev.vars and fill in your values.
+# These are referenced by authEnvVar in the MCP_SERVERS wrangler config.
+#
+# Example wrangler.jsonc MCP_SERVERS config:
+# "MCP_SERVERS": "[{\"name\":\"zeabur\",\"url\":\"https://mcp.zeabur.com/mcp\",\"authEnvVar\":\"ZEABUR_API_KEY\"}]"
+#
+# ZEABUR_API_KEY=your-zeabur-api-key-here

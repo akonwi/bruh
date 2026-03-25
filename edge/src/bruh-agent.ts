@@ -1,11 +1,21 @@
 import { Agent } from 'agents';
 import type { SessionEventEnvelope, SessionMetadata, SessionPromptRequest } from './session';
 
+interface McpServerConfig {
+  name: string;
+  url: string;
+  authEnvVar?: string;
+  transport?: 'auto' | 'sse' | 'streamable-http';
+  headers?: Record<string, string>;
+}
+
 interface BruhEnv {
   BRUH_AGENT: DurableObjectNamespace;
   MEMORY_BUCKET: R2Bucket;
   RUNTIME_BASE_URL?: string;
   INTERNAL_API_SECRET?: string;
+  MCP_SERVERS?: string;
+  [key: string]: unknown;
 }
 
 interface BruhState {
@@ -50,6 +60,58 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
 
   async onStart(): Promise<void> {
     this.ensureSchema();
+    await this.connectConfiguredMcpServers();
+  }
+
+  private async connectConfiguredMcpServers(): Promise<void> {
+    const raw = this.env.MCP_SERVERS;
+    if (!raw || typeof raw !== 'string') return;
+
+    let configs: McpServerConfig[];
+    try {
+      configs = JSON.parse(raw);
+    } catch {
+      console.error('[BruhAgent] Failed to parse MCP_SERVERS config');
+      return;
+    }
+
+    if (!Array.isArray(configs)) return;
+
+    for (const config of configs) {
+      if (!config.name || !config.url) continue;
+
+      try {
+        const existingServers = this.getMcpServers();
+        const alreadyConnected = Object.values(existingServers.servers).some(
+          (s) => s.name === config.name && (s.state === 'ready' || s.state === 'discovering' || s.state === 'connected'),
+        );
+        if (alreadyConnected) continue;
+
+        const transportHeaders: Record<string, string> = { ...config.headers };
+        if (config.authEnvVar) {
+          const token = this.env[config.authEnvVar];
+          if (typeof token === 'string' && token.trim()) {
+            transportHeaders['Authorization'] = `Bearer ${token.trim()}`;
+          }
+        }
+
+        const options: Record<string, unknown> = {};
+        if (Object.keys(transportHeaders).length > 0 || config.transport) {
+          options.transport = {
+            ...(Object.keys(transportHeaders).length > 0 ? { headers: transportHeaders } : {}),
+            ...(config.transport ? { type: config.transport } : {}),
+          };
+        }
+
+        await this.addMcpServer(config.name, config.url, options);
+        console.log(`[BruhAgent] Connected to configured MCP server: ${config.name}`);
+      } catch (error) {
+        console.error(
+          `[BruhAgent] Failed to connect to configured MCP server ${config.name}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
   }
 
   private ensureSchema(): void {
