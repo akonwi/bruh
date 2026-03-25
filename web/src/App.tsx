@@ -94,7 +94,9 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 
 function ChatView({ sessionId }: { sessionId: string }) {
   const agent = useAgent({ agent: 'BruhAgent', name: sessionId })
-  const { messages, input, setInput, handleSubmit, isLoading, stop, error } = useAgentChat({ agent })
+  const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
+  const [input, setInput] = useState('')
+  const isLoading = status === 'streaming' || status === 'submitted'
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageEndRef = useRef<HTMLDivElement | null>(null)
@@ -113,10 +115,17 @@ function ChatView({ sessionId }: { sessionId: string }) {
     scrollToBottom()
   }, [sessionId, scrollToBottom])
 
+  const handleSend = useCallback(() => {
+    const text = input.trim()
+    if (!text || isLoading) return
+    sendMessage({ role: 'user', content: text, parts: [{ type: 'text', text }] })
+    setInput('')
+  }, [input, isLoading, sendMessage])
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
-    handleSubmit()
+    handleSend()
   }
 
   return (
@@ -169,7 +178,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
 
           <div className='border bg-card shadow-sm'>
             <textarea
-              value={input ?? ''}
+              value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={sessionId === MAIN_SESSION_ID ? 'Message Main…' : 'Message this thread…'}
@@ -185,7 +194,7 @@ function ChatView({ sessionId }: { sessionId: string }) {
                   Stop
                 </Button>
               ) : (
-                <Button onClick={() => handleSubmit()} disabled={!input?.trim()}>
+                <Button onClick={handleSend} disabled={!input.trim()}>
                   <ArrowSquareOut data-icon='inline-start' />
                   Send
                 </Button>
