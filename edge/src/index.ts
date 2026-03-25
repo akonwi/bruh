@@ -152,6 +152,37 @@ app.post('/sessions/:sessionId/abort', async (c) => {
   return stub.fetch(new Request('https://agent/abort', { method: 'POST' }));
 });
 
+app.post('/internal/sessions/:sessionId/schedule', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+});
+
+app.get('/internal/sessions/:sessionId/schedules', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/schedules'));
+});
+
+app.post('/internal/sessions/:sessionId/cancel-schedule', async (c) => {
+  const sessionId = c.req.param('sessionId');
+  const body = await c.req.text();
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId);
+
+  return stub.fetch(new Request('https://agent/cancel-schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+});
+
 app.post('/internal/sessions/:sessionId/events', async (c) => {
   const sessionId = c.req.param('sessionId');
   const body = await c.req.text();

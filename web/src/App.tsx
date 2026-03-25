@@ -240,6 +240,12 @@ function summarizeToolActivity(toolName: string, args?: Record<string, unknown>)
       const target = path || 'workspace/'
       return `Searched for ${truncateInline(`"${query}" in ${target}`)}`
     }
+    case 'schedule_set':
+      return `Scheduling ${truncateInline(typeof args?.message === 'string' ? args.message : 'reminder')}`
+    case 'schedule_list':
+      return 'Checking schedules'
+    case 'schedule_cancel':
+      return `Cancelling schedule ${truncateInline(typeof args?.scheduleId === 'string' ? args.scheduleId : '')}`
     case 'thread_list':
       return 'Checking side threads'
     case 'thread_summary': {
@@ -401,6 +407,19 @@ function buildTranscript(events: SessionEventEnvelope[]): TranscriptItem[] {
         timestamp: event.timestamp,
       })
       currentAssistant = null
+      continue
+    }
+
+    if (event.type === 'schedule.fired') {
+      const message = typeof event.payload.message === 'string' ? event.payload.message : 'Scheduled task fired'
+      items.push({
+        kind: 'message',
+        id: `system-${event.seq}`,
+        role: 'system',
+        status: 'complete',
+        text: `⏰ ${message}`,
+        timestamp: event.timestamp,
+      })
       continue
     }
 

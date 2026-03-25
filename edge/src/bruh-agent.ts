@@ -96,6 +96,12 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
         return this.handleRegisterThread(request);
       case 'GET /threads':
         return this.handleListThreads();
+      case 'POST /schedule':
+        return this.handleSchedule(request);
+      case 'GET /schedules':
+        return this.handleListSchedules();
+      case 'POST /cancel-schedule':
+        return this.handleCancelSchedule(request);
       default:
         return new Response('Not found', { status: 404 });
     }
@@ -173,6 +179,72 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
       createdAt: t.created_at,
     }));
     return Response.json({ sessions });
+  }
+
+  // --- Scheduling ---
+
+  private async handleSchedule(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      message?: string;
+      delaySeconds?: number;
+      scheduledAt?: string;
+    };
+
+    const message = body.message?.trim();
+    if (!message) {
+      return Response.json({ error: 'message is required' }, { status: 400 });
+    }
+
+    const when = body.scheduledAt
+      ? new Date(body.scheduledAt)
+      : body.delaySeconds && body.delaySeconds > 0
+        ? body.delaySeconds
+        : null;
+
+    if (!when) {
+      return Response.json(
+        { error: 'delaySeconds or scheduledAt is required' },
+        { status: 400 },
+      );
+    }
+
+    const schedule = await this.schedule(when, 'executeScheduledTask', message);
+
+    return Response.json({
+      ok: true,
+      scheduleId: schedule.id,
+      message,
+      type: schedule.type,
+    });
+  }
+
+  private handleListSchedules(): Response {
+    const schedules = this.getSchedules().map((s) => ({
+      id: s.id,
+      type: s.type,
+      callback: s.callback,
+      payload: s.payload,
+      scheduledAt: s.time ? new Date(s.time).toISOString() : undefined,
+    }));
+    return Response.json({ schedules });
+  }
+
+  private async handleCancelSchedule(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { scheduleId?: string };
+    const scheduleId = body.scheduleId?.trim();
+    if (!scheduleId) {
+      return Response.json({ error: 'scheduleId is required' }, { status: 400 });
+    }
+
+    const cancelled = await this.cancelSchedule(scheduleId);
+    return Response.json({ ok: true, cancelled });
+  }
+
+  async executeScheduledTask(message: string): Promise<void> {
+    await this.appendEvent('schedule.fired', {
+      message,
+      firedAt: new Date().toISOString(),
+    });
   }
 
   // --- Prompt / steer / follow-up / abort ---
