@@ -3,5 +3,8 @@
 ANTHROPIC_API_KEY=your-anthropic-api-key
 # OPENAI_API_KEY=your-openai-api-key
 
+# Host for MCP OAuth callbacks (required for OAuth MCP servers)
+HOST=http://localhost:8790
+
 # Internal API secret for storage routes (optional for local dev)
 # INTERNAL_API_SECRET=your-secret-here

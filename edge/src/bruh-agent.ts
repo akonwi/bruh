@@ -23,6 +23,7 @@ interface BruhEnv {
   OPENAI_API_KEY?: string;
   INTERNAL_API_SECRET?: string;
   MCP_SERVERS?: string;
+  HOST?: string; // e.g. "http://localhost:8790" or "https://bruh-edge.akonwi.workers.dev"
   [key: string]: unknown;
 }
 
@@ -172,7 +173,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           }
         }
 
-        const options: Record<string, unknown> = {};
+        const callbackHost = this.env.HOST?.trim() || 'http://localhost:8790';
+        const options: Record<string, unknown> = { callbackHost };
         if (Object.keys(transportHeaders).length > 0 || config.transport) {
           options.transport = {
             ...(Object.keys(transportHeaders).length > 0 ? { headers: transportHeaders } : {}),
@@ -463,7 +465,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         }),
         execute: async ({ name, url, headers }) => {
           try {
-            const options: Record<string, unknown> = {};
+            const callbackHost = agent.env.HOST?.trim() || 'http://localhost:8790';
+            const options: Record<string, unknown> = { callbackHost };
             if (headers && Object.keys(headers).length > 0) {
               options.transport = { headers };
             }
