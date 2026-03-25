@@ -74,6 +74,7 @@ interface ToolActivityItem {
   status: ToolActivityStatus
   timestamp: string
   args?: Record<string, unknown>
+  resultText?: string
 }
 
 type TranscriptItem = ChatMessage | ToolActivityItem
@@ -466,6 +467,7 @@ function buildTranscript(events: SessionEventEnvelope[]): TranscriptItem[] {
       const toolName = typeof event.payload.toolName === 'string' ? event.payload.toolName : 'tool'
       const toolCallId = typeof event.payload.toolCallId === 'string' ? event.payload.toolCallId : undefined
       const isError = Boolean(event.payload.isError)
+      const resultText = typeof event.payload.resultText === 'string' ? event.payload.resultText : undefined
 
       const toolItem =
         (toolCallId ? toolItems.get(toolCallId) : null) ?? findLatestRunningTool(toolName)
@@ -473,6 +475,7 @@ function buildTranscript(events: SessionEventEnvelope[]): TranscriptItem[] {
       if (toolItem) {
         toolItem.status = isError ? 'error' : 'success'
         toolItem.timestamp = event.timestamp
+        toolItem.resultText = resultText
         if (toolCallId) {
           toolItems.delete(toolCallId)
         }
@@ -484,6 +487,7 @@ function buildTranscript(events: SessionEventEnvelope[]): TranscriptItem[] {
           toolName,
           status: isError ? 'error' : 'success',
           timestamp: event.timestamp,
+          resultText,
         })
       }
 
@@ -1033,6 +1037,7 @@ function App() {
                             ? 'text-destructive'
                             : 'text-emerald-600 dark:text-emerald-300'
                       const argsText = formatToolArgs(item.args)
+                      const hasResult = item.status !== 'running' && item.resultText
 
                       return (
                         <div key={item.id} className='flex justify-start'>
@@ -1061,12 +1066,18 @@ function App() {
                                 <span>•</span>
                                 <span>{formatMessageTime(item.timestamp)}</span>
                               </div>
-                              {argsText ? (
+                              {hasResult ? (
                                 <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>
+                                  {item.resultText}
+                                </pre>
+                              ) : argsText ? (
+                                <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground'>
                                   {argsText}
                                 </pre>
                               ) : (
-                                <p className='text-muted-foreground'>No arguments</p>
+                                <p className='text-muted-foreground'>
+                                  {item.status === 'running' ? 'Running…' : 'No output'}
+                                </p>
                               )}
                             </div>
                           </details>

@@ -466,16 +466,26 @@ export class PiSessionRegistry {
           },
         });
         return;
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
+        const resultContent = event.result?.content;
+        const resultText = Array.isArray(resultContent)
+          ? resultContent
+              .filter((part: { type?: string; text?: string }) => part?.type === 'text' && typeof part.text === 'string')
+              .map((part: { text: string }) => part.text)
+              .join('\n')
+          : undefined;
+
         await this.publish(sessionId, {
           type: 'tool.execution.end',
           payload: {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             isError: event.isError,
+            resultText: resultText || undefined,
           },
         });
         return;
+      }
       default:
         return;
     }
