@@ -483,13 +483,16 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
               options.transport = { headers };
             }
 
+            console.log(`[MCP] addMcpServer("${name}", "${url}", ${JSON.stringify(options)})`);
             const result = await agent.addMcpServer(name, url, options);
+            console.log(`[MCP] addMcpServer result:`, JSON.stringify(result));
 
             // addMcpServer may return "ready" before the async connection settles.
             // Wait briefly then check the actual server state.
             await new Promise(r => setTimeout(r, 3000));
             const state = agent.getMcpServers();
             const server = Object.values(state.servers).find(s => s.name === name);
+            console.log(`[MCP] actual server state after 3s:`, JSON.stringify(server));
 
             if (server?.state === 'authenticating' && server.auth_url) {
               return `🔐 Server "${name}" requires OAuth authorization.\n\nPlease visit this URL to authorize:\n${server.auth_url}\n\nOnce authorized, the server's tools will become available on the next message.`;
