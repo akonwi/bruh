@@ -1,6 +1,6 @@
 # Bruh TODO
 
-Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
+Concrete implementation tracker for the current Bruh plan.
 
 ## Status legend
 
@@ -10,204 +10,185 @@ Concrete implementation tracker for the Pi-on-Cloudflare rebuild.
 
 ---
 
-## 0. Planning + repo direction
+## 0. Foundation already built
 
-- [x] Decide to pivot away from MoltWorker/OpenClaw
-- [x] Choose repo layout:
+These core pieces are already in place:
+
+- [x] Pivot away from MoltWorker/OpenClaw
+- [x] Create repo layout:
   - `edge/`
   - `runtime/`
   - `web/`
-- [x] Write north-star architecture doc in `docs/README.md`
-- [x] Decide what to do with legacy `server/` code
-  - deleted the old OpenClaw/MoltWorker `server/` path
-- [x] Update root README to reflect the new direction
-
----
-
-## 1. Root workspace setup
-
-- [x] Create root `package.json` workspace covering `edge`, `runtime`, and `web`
-- [x] Add shared root scripts for install/dev/build/typecheck
-- [x] Add root `.gitignore` cleanup for new apps
-- [x] Add root README links to `docs/README.md` and this TODO
-
----
-
-## 2. Web app scaffold (`web/`)
-
-- [x] Create `web/` app with Vite + React + TypeScript
-- [x] Bootstrap shadcn with:
-  - `bunx shadcn create --preset buFzo92`
-- [x] Add Base UI
-- [x] Add Tailwind v4 setup
-- [~] Port/adapt theme conventions from `../stone/...`
-  - [ ] colors/tokens
-  - [x] typography
-  - [ ] radius/border conventions
-  - [ ] dark mode provider
-  - [x] `cn()` utility
-- [x] Create app shell
-- [x] Create chat page skeleton
-- [x] Create empty session list UI
-- [x] Add transport layer for session HTTP + SSE
-- [x] Add reconnect/resume behavior for SSE stream
-
----
-
-## 3. Edge scaffold (`edge/`)
-
-- [x] Create Cloudflare Worker app
-- [x] Add Wrangler config
-- [~] Add bindings:
-  - [x] Durable Objects
-  - [x] R2 bucket
-- [ ] Add auth middleware placeholder for single-user access
-- [x] Add health endpoint
-- [x] Add internal runtime auth mechanism (shared secret)
-
----
-
-## 4. Session Durable Objects
-
-- [x] Create `SessionDO`
-- [x] Define session metadata model
-- [x] Define outbound event envelope with `sessionId` + `seq`
-- [x] Add event buffering/replay in `SessionDO`
-- [x] Add SSE stream endpoint: `GET /sessions/:id/stream`
-- [~] Add command intake endpoints routed through DO:
-  - [x] `POST /sessions`
-  - [x] `GET /sessions`
-  - [x] `GET /sessions/:id`
-  - [x] `POST /sessions/:id/prompt`
-  - [x] `POST /sessions/:id/steer`
-  - [x] `POST /sessions/:id/follow-up`
-  - [x] `POST /sessions/:id/abort`
-- [x] Decide whether we need a `SessionIndexDO` immediately or later
-
----
-
-## 5. Runtime scaffold (`runtime/`)
-
-- [x] Create Node runtime app
-- [ ] Add Dockerfile suitable for Cloudflare sandbox/container
-- [x] Add Hono/Fastify server
-- [x] Add health endpoint
-- [x] Add internal endpoints for edge-to-runtime calls
-- [x] Add runtime config loader
-- [ ] Decide runtime filesystem layout
-  - [ ] working directory
-  - [ ] Pi agent dir
-  - [ ] temp/data dirs
-
----
-
-## 6. Pi SDK integration
-
-- [x] Install `@mariozechner/pi-coding-agent`
-- [x] Build Pi session factory around `createAgentSession()`
-- [x] Configure runtime API keys with `AuthStorage.setRuntimeApiKey(...)`
-- [x] Add `DefaultResourceLoader`
-- [x] Add project-local `.pi/` layout in `runtime/`
-  - [x] `.pi/extensions/`
-  - [x] `.pi/skills/`
-  - [x] `.pi/AGENTS.md`
-- [ ] Start with restricted/baseline tool set
-- [x] Subscribe to Pi session events and normalize them for edge streaming
-- [x] Support runtime commands:
+- [x] Build the current Worker + Durable Object + SSE control plane
+- [x] Build the current Pi SDK runtime
+- [x] Build the web chat UI
+- [x] Support:
   - [x] prompt
   - [x] steer
   - [x] follow-up
   - [x] abort
+- [x] Add R2-backed memory tools
+- [x] Add thread-local workspace roots in the transition runtime
+- [x] Add controlled workspace file tools:
+  - [x] `workspace_list`
+  - [x] `workspace_read`
+  - [x] `workspace_write`
+  - [x] `workspace_edit`
+  - [x] `workspace_search`
+- [x] Add main thread semantics at `/`
+- [x] Add side thread routes at `/threads/:id`
+- [x] Add rolling thread summaries in `memory/sessions/<session-id>/summary.md`
+- [x] Define memory conventions for:
+  - [x] `profile.md`
+  - [x] `notes/YYYY-MM-DD.md`
+  - [x] `projects/<slug>/...`
+  - [x] `sessions/<session-id>/summary.md`
+
+The current system is a strong foundation, but it is now the **transition architecture**, not the final target.
 
 ---
 
-## 7. End-to-end session flow
+## 1. Sandbox the runtime (next)
 
-- [x] Create session in edge
-- [x] Start/reuse runtime Pi session from edge command flow
-- [x] Forward runtime events back to `SessionDO`
-- [x] Stream events to web via SSE
-- [x] Render streaming assistant text in UI
-- [ ] Render tool activity in UI
-- [x] Handle reconnect with sequence replay
+Goal: move the current Pi runtime into the **Cloudflare Sandbox SDK** with minimal product churn.
 
----
+- [x] Add Dockerfile / sandbox packaging for `runtime/`
+- [x] Decide how the current runtime server boots inside Sandbox
+- [x] Start the existing Pi runtime server inside Sandbox
+- [ ] Verify `.pi/` loading works in Sandbox
+- [ ] Verify Anthropic auth/model selection works in Sandbox
+- [ ] Verify memory extension + summary writes still work in Sandbox
+- [x] Forward prompt / steer / follow-up / abort to the sandboxed runtime while preserving the current HTTP contract
+- [ ] Preserve runtime event publishing back to edge
+- [ ] Validate end-to-end from web through sandboxed runtime
 
-## 8. Durable memory / R2 storage
-
-### 8.1 Edge internal storage API
-- [x] Add internal storage auth between runtime and edge
-- [x] Add `GET /internal/storage/object?path=...`
-- [x] Add `PUT /internal/storage/object?path=...`
-- [x] Add `GET /internal/storage/list?prefix=...`
-- [x] Add `POST /internal/storage/edit`
-- [~] Add optimistic concurrency/version checks
-- [x] Define storage error format for conflicts/not found/etc.
-
-### 8.2 Runtime Pi extension for memory
-- [x] Create `runtime/.pi/extensions/memory.ts`
-- [x] Add tool: `memory_read(path)`
-- [x] Add tool: `memory_write(path, content)`
-- [x] Add tool: `memory_edit(path, oldText, newText)`
-- [x] Add tool: `memory_list(prefix?)`
-- [x] Add tool: `memory_append(path, content)`
-- [x] Add clear tool descriptions/guidelines so the model uses them well
-
-### 8.3 Initial memory conventions
-- [ ] Define `memory/profile.md`
-- [ ] Define `memory/notes/YYYY-MM-DD.md`
-- [ ] Define `memory/projects/<slug>/...`
-- [ ] Define `memory/sessions/<session-id>/summary.md`
-- [ ] Add a simple skill/instructions for when to store durable memory
+### 1.1 Initial sandbox topology
+- [x] Define the canonical sandbox ID for main
+- [x] Start with `main` mapped to the canonical root sandbox
+- [x] Start with all threads in Sandbox immediately
 
 ---
 
-## 9. Basic product UX
+## 2. Make sandbox identity match thread identity
 
-- [x] New session flow in UI
-- [x] Transcript rendering
-- [x] Composer with prompt submit
-- [x] Abort button
-- [x] Session status indicator
-- [x] Session list view
-- [x] Open existing session
-- [x] Empty state / first-run state
-- [x] Error banners for runtime/stream/storage failures
+Goal: one execution workspace per thread.
 
----
-
-## 10. Deployment
-
-- [ ] Deploy `edge/` Worker
-- [ ] Deploy `runtime/` in Cloudflare sandbox/container
-- [ ] Configure runtime wake/proxy path from edge
-- [ ] Configure env vars and secrets
-- [ ] Verify SSE works through edge in production
-- [ ] Verify multiple sessions can be active concurrently
+- [ ] Map `main` → canonical root sandbox
+- [ ] Map each side thread → dedicated sandbox
+- [ ] Ensure each sandbox keeps its own:
+  - [ ] Pi session files/history
+  - [ ] workspace files
+  - [ ] temp/artifacts
+  - [ ] background processes
+- [ ] Keep R2 memory shared across all threads
+- [ ] Keep the same overall tool surface across main and side threads
+- [ ] Ensure workspace tools are sandbox-scoped per thread
 
 ---
 
-## 11. Validation checklist
+## 3. Thread awareness and registry
 
-- [ ] Create a session from web
-- [ ] Send a prompt and receive streaming output
-- [ ] Abort an in-flight run
-- [ ] Reconnect and recover stream state
-- [ ] Run `memory_write`
-- [ ] Run `memory_read`
-- [ ] Run `memory_edit`
-- [ ] Run `memory_append`
-- [ ] Run two separate sessions concurrently
-- [ ] Confirm one session does not corrupt another's ordering
+Goal: let main understand side threads without loading every raw transcript.
+
+- [ ] Define a thread registry model
+- [ ] Track thread metadata:
+  - [ ] thread ID
+  - [ ] title
+  - [ ] created/updated timestamps
+  - [ ] status
+  - [ ] sandbox ID
+  - [ ] latest summary timestamp
+- [ ] Ensure every thread keeps an up-to-date `memory/sessions/<thread-id>/summary.md`
+- [ ] Let main surface side-thread status and summaries cleanly
+- [ ] Decide where the registry lives short-term vs long-term
+  - [ ] short-term transitional storage
+  - [ ] long-term Agent state / SQLite
 
 ---
 
-## 12. Later / not now
+## 4. Workspace power inside sandboxes
 
-- [ ] Controlled local workspace file tools
-- [ ] Restricted bash/edit/write beyond memory tools
+Goal: grow from memory-only power into real thread-local workspaces.
+
+- [~] Define the sandbox filesystem layout
+  - [ ] Pi session files
+  - [x] workspace root
+  - [x] artifacts/temp dirs
+- [~] Add controlled workspace tools
+  - [x] read/search
+  - [ ] bash
+  - [x] write/edit
+  - [ ] git helpers
+- [ ] Support long-running/background processes when needed
+- [ ] Support exposing local services/ports when needed
+- [ ] Decide how local artifacts should be surfaced back to the app
+
+---
+
+## 5. Move orchestration to Cloudflare Agents
+
+Goal: replace the current custom thread/session control plane with **Cloudflare Agents**.
+
+- [ ] Design one Agent instance per thread
+- [ ] Replace `SessionDO` / `SessionIndexDO` responsibilities with Agents
+- [ ] Use base `Agent`, not `AIChatAgent`, for orchestration
+- [ ] Persist thread registry and control-plane state in Agent state / SQLite
+- [ ] Route clients through Agents-compatible endpoints/connections
+- [ ] Keep Pi in Sandbox as the execution engine behind the Agent
+- [ ] Move scheduling/wakeup semantics onto Agents
+- [ ] Move workflow coordination onto Agents
+
+---
+
+## 6. Capability expansion after Agents
+
+Goal: unlock the capabilities the product actually wants long-term.
+
+- [ ] Web browsing
+- [ ] Scheduled jobs
+- [ ] Workflows
+- [ ] MCP server support
+- [ ] MCP client support
+- [ ] Custom remote tools
+- [ ] Human approvals / handoff patterns
+- [ ] Notifications / proactive work
+
+---
+
+## 7. Deployment and production hardening
+
+- [ ] Deploy `edge/`
+- [ ] Deploy sandboxed runtime
+- [ ] Configure real secrets/env vars
+- [ ] Add single-user auth on edge/control plane
+- [ ] Verify memory + summaries in production
+- [ ] Verify thread-to-sandbox routing in production
+- [ ] Verify multiple active threads do not corrupt each other
+- [ ] Decide whether/when Pi session files need backup/export beyond sandbox-local storage
+
+---
+
+## 8. Validation checklist
+
+- [ ] Main thread works from web through sandboxed runtime
+- [ ] Side thread works from web through its sandboxed runtime
+- [ ] `steer` works during active runs
+- [ ] `follow-up` works during active runs
+- [ ] abort works during active runs
+- [ ] reconnect/replay still works
+- [ ] `memory_write` works
+- [ ] `memory_read` works
+- [ ] `memory_edit` works
+- [ ] `memory_append` works
+- [ ] summaries are written for main and side threads
+- [ ] two thread sandboxes can run concurrently without leaking workspace state
+
+---
+
+## 9. Later / not now
+
 - [ ] Mobile client
-- [ ] Browser helpers
-- [ ] Notifications
-- [ ] Rich dashboards
-- [ ] Evaluate WebSockets later if SSE becomes limiting
+- [ ] Full extension-generated web UI surfaces
+- [ ] Rich dashboards before core agent flows need them
+- [ ] Multi-tenant architecture
+- [ ] Reproducing Pi's TUI in the browser

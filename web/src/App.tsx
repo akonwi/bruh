@@ -227,6 +227,19 @@ function summarizeToolActivity(toolName: string, args?: Record<string, unknown>)
       return `Saved ${truncateInline(path ?? 'memory file')}`
     case 'memory_list':
       return `Recalling ${truncateInline(prefix || 'memory/')}`
+    case 'workspace_read':
+      return `Opened ${truncateInline(path ?? 'workspace file')}`
+    case 'workspace_write':
+      return `Saved ${truncateInline(path ?? 'workspace file')}`
+    case 'workspace_edit':
+      return `Editing ${truncateInline(path ?? 'workspace file')}`
+    case 'workspace_list':
+      return `Opened ${truncateInline(path || 'workspace/')}`
+    case 'workspace_search': {
+      const query = typeof args?.query === 'string' ? args.query : 'query'
+      const target = path || 'workspace/'
+      return `Searched for ${truncateInline(`"${query}" in ${target}`)}`
+    }
     case 'read':
       return `Opened ${truncateInline(path ?? 'file')}`
     case 'write':

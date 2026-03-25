@@ -9,6 +9,8 @@ This memory is **not** a general workspace filesystem. It is a small, intentiona
 - dated notes
 - rolling session summaries
 
+All threads share the same R2-backed memory tree. The main thread and all side threads should read and write the same durable memory.
+
 ## Principles
 
 - Keep durable memory **small, readable, and reusable**.
@@ -16,6 +18,15 @@ This memory is **not** a general workspace filesystem. It is a small, intentiona
 - Store information that will help later.
 - Avoid storing one-off chatter unless it will matter again.
 - Do not store secrets unless the user explicitly asks.
+
+## Memory vs sandbox filesystem
+
+Use the two layers differently:
+
+- **R2 memory** is the shared, durable memory system across main and all side threads.
+- **Sandbox filesystem** is the thread-local execution/workspace layer.
+- Actual raw **Pi session files/history** can live in each thread's sandbox.
+- `sessions/<session-id>/summary.md` is the durable cross-thread handoff, not the full raw session history.
 
 ## Path conventions
 
@@ -94,7 +105,7 @@ When in doubt:
 
 Use for a rolling summary of a session or thread.
 
-In Bruh, this file is intended primarily as a **rehydration snapshot** for returning to a thread later.
+In Bruh, this file is intended primarily as a **rehydration snapshot** for returning to a thread later and for helping the main thread stay aware of side threads.
 
 Current behavior:
 - `sessions/<session-id>/summary.md` is **auto-written by the runtime** after completed runs

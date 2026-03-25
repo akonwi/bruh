@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "cd web && bun run dev",
     "dev:runtime": "cd runtime && bun run dev",
+    "dev:runtime:local": "cd runtime && bun run dev:local",
     "dev:edge": "cd edge && bun run dev",
     "build": "bun run build:web && bun run build:runtime && bun run build:edge",
     "build:web": "cd web && bun run build",

@@ -2,328 +2,366 @@
 
 ## Goal
 
-Build a personal AI agent platform around **Pi** that runs in a **Cloudflare sandbox/container** and is accessed through a **lightweight web UI**.
+Build a personal AI agent platform around **Pi** on Cloudflare that feels like:
+- one ongoing relationship with **Bruh** in the **main thread**
+- focused side threads for ad-hoc projects and parallel work
+- shared durable memory across all threads
+- sandboxed workspaces for real execution power
+- Cloudflare-native orchestration for future capabilities like schedules, workflows, browsing, and MCP
 
-This replaces the earlier MoltWorker/OpenClaw experiment. The new direction is to use **Pi natively** via its **SDK**, keep the edge layer thin, and build only the pieces we actually want.
+The immediate next step is to move the Pi runtime into the **Cloudflare Sandbox SDK**. After that, the long-term control plane should move from the current custom Worker + Durable Object orchestration to **Cloudflare Agents**.
 
-## Product shape
+See also:
+- [Memory conventions](./memory.md)
+- [Progress tracker](./TODO.md)
 
-- **Personal**, single-user system
-- **Pi-powered** runtime
-- **Cloudflare-hosted** edge + sandbox/container runtime
-- **Web-first UX** now, mobile later
-- Durable object/session orchestration at the edge
-- Durable memory/artifacts stored in **R2**
+---
 
-## Guiding principles
+## Product requirements
 
-1. **Pi-native, not Pi-emulated**
-   - Use Pi's SDK directly in the runtime service.
-   - Do not remote-control Pi's TUI.
-   - Do not build around someone else's bot/gateway assumptions.
+### 1) Main thread = Bruh
+- `/` is the canonical ongoing thread
+- the main thread lives in the canonical **root sandbox**
+- the sandbox filesystem can keep Bruh's actual **Pi session history** and working state
 
-2. **Thin edge, real runtime**
-   - Cloudflare Worker + Durable Objects coordinate sessions, auth, and streaming.
-   - The sandbox/container runtime hosts Pi and does the real agent work.
+### 2) Side threads are focused branches
+- `/threads/:id` are focused branches of the same agent, not separate personas
+- side threads should eventually get their own **sandboxed workspace** and Pi session history
+- they should share the same durable memory and overall tool surface as main
 
-3. **Simple transport first**
-   - Use **HTTP commands + SSE streaming** for v1.
-   - WebSockets remain an option later if the product clearly needs richer bidirectional transport.
+### 3) Shared durable memory
+All threads share the same R2-backed memory layer.
 
-4. **Session isolation by default**
-   - One **Durable Object per session**.
-   - Multiple sessions may be active concurrently.
-   - Within a session, command ordering stays serialized and predictable.
+That includes:
+- user preferences
+- durable facts
+- dated notes
+- project memory
+- session/thread summaries
 
-5. **Durable memory before general filesystem power**
-   - First custom storage tools should be **R2-backed object tools**.
-   - Keep these separate from any future local workspace file tools.
+### 4) Future agent capabilities
+The platform should support:
+- web browsing
+- workflows
+- scheduled jobs
+- MCP/custom tools
+- richer cloud-native orchestration over time
 
-6. **Safe, composable tools**
-   - Start with restricted/default-safe tool behavior.
-   - Add custom Pi extensions for memory, storage, safety rails, and later local file editing.
+---
 
-7. **Keep the repo light**
-   - Prefer a simple top-level layout:
+## Operating model
 
-```txt
-bruh/
-  edge/
-  runtime/
-  web/
-```
+### Main thread
+The main thread is the user's home conversation with Bruh.
+
+It should:
+- feel continuous over time
+- own the canonical root sandbox
+- have access to all shared memory
+- be able to inspect the status and summaries of side threads
+
+### Side threads
+Side threads are ad-hoc branches for:
+- projects
+- investigations
+- experiments
+- temporary focused chats
+
+They should:
+- inherit Bruh's identity and shared memory
+- have the same overall capability surface
+- keep their own sandbox-local workspace, files, processes, and Pi session history
+
+### How main should know about side threads
+Main should not need every raw side-thread transcript.
+
+Instead, side-thread awareness should come from:
+- thread metadata / registry
+- shared durable memory
+- `memory/sessions/<thread-id>/summary.md`
+
+Those summaries become the durable handoff between branches.
+
+---
+
+## Storage model
+
+Different kinds of state belong in different places.
+
+| Concern | Home | Notes |
+|---|---|---|
+| durable memory | **R2** | shared across main and all side threads |
+| preferences / profile | **R2** | `memory/profile.md` |
+| dated notes | **R2** | `memory/notes/YYYY-MM-DD.md` |
+| project memory | **R2** | `memory/projects/<slug>/...` |
+| thread summaries | **R2** | `memory/sessions/<thread-id>/summary.md` |
+| actual Pi session history | **sandbox filesystem** | local to the thread's sandbox |
+| workspace files / repos / temp artifacts | **sandbox filesystem** | local to the thread's sandbox |
+| running services / background processes | **sandbox filesystem** | local to the thread's sandbox |
+| thread registry / schedules / workflows | **Agents state / SQLite later** | durable orchestration layer |
+
+### Important distinction
+- **R2** is the durable cross-thread memory system
+- **sandbox filesystem** is the thread-local execution/workspace system
+
+This keeps durable memory clean while still letting Pi use a real filesystem and local process model.
+
+---
 
 ## Repo layout
 
 ```txt
 bruh/
-  edge/     # Cloudflare Worker + Durable Objects + R2 bindings
-  runtime/  # Pi SDK host running in a Cloudflare sandbox/container
-  web/      # React/Vite app with shadcn + Base UI + Stone-derived theme
-  docs/     # Planning docs and progress tracking
+  edge/     # current Worker/DO control plane and R2 APIs
+  runtime/  # Pi runtime that will move into Cloudflare Sandbox
+  web/      # React/Vite UI
+  docs/     # planning docs and progress tracking
 ```
 
 Notes:
-- A root `package.json` workspace is fine.
-- Avoid introducing extra shared packages until they are clearly needed.
-- Small shared protocol types can live inline at first and be extracted later if necessary.
+- keep the repo light
+- avoid introducing extra packages until the boundaries are stable
+- small shared protocol types can stay inline until the architecture settles
 
-## Architecture
+---
 
-### 1) `edge/`
+## Architecture plan
 
-Responsibilities:
-- authentication
-- session creation and lookup
-- **Durable Object per session**
-- SSE stream endpoint for live agent events
-- proxy/forward commands to runtime
-- internal storage endpoints backed by **R2**
-- optional audit/logging/rate limiting
+### Current implemented foundation
+The current system already has a solid foundation:
+- Worker + Durable Object session orchestration
+- SSE event streaming and replay
+- Pi SDK runtime
+- R2-backed memory tools
+- thread-local workspace roots in the transition runtime
+- controlled workspace file tools
+- main thread at `/`
+- side threads at `/threads/:id`
+- steer / follow-up / abort
+- web chat UX
 
-Key design:
-- `SessionDO` owns session coordination
-- optional `SessionIndexDO` tracks discoverability / metadata
-- edge should stay thin and orchestration-focused
+That foundation remains useful, but it is now the **transition architecture**, not the final destination.
 
-### 2) `runtime/`
+### 1) `edge/` — current transitional control plane
+Current responsibilities:
+- session/thread routing
+- event buffering and replay
+- SSE stream endpoints
+- forwarding commands to runtime
+- R2-backed internal storage APIs
 
+Near-term role:
+- stay in place while the runtime moves into Sandbox
+- continue to provide the current chat product without a big rewrite
+
+Long-term role:
+- most thread orchestration responsibilities should move into **Cloudflare Agents**
+
+### 2) `runtime/` — Pi execution engine
 Responsibilities:
 - host Pi via `createAgentSession()`
-- manage Pi sessions and event subscriptions
-- load project-local Pi extensions/skills
-- execute prompts/steer/follow-up/abort commands
-- call edge internal APIs for durable memory/storage
+- load `.pi/` extensions and prompts
+- execute prompt / steer / follow-up / abort
+- publish normalized events
+- write thread summaries to R2
 
-Key design:
-- use **Pi SDK**, not RPC, for v1
-- use project-local `.pi/extensions/` for custom tools
-- inject provider API keys via runtime env and `AuthStorage.setRuntimeApiKey(...)`
+Near-term direction:
+- move this runtime into **Cloudflare Sandbox SDK**
+- preserve the current HTTP/event contract as much as possible during migration
 
-### 3) `web/`
+Long-term role:
+- Pi remains the execution engine inside each thread's sandbox
 
+### 3) `web/` — product UI
 Responsibilities:
-- lightweight chat UI
-- show streaming assistant text
-- show tool activity/status
-- manage reconnect/resume UX
-- session list/create/open UI
+- main thread UI
+- side thread UI
+- transcript and tool activity
+- composer and controls
+- thread list and navigation
 
-UI stack:
-- **React + Vite + TypeScript**
-- **Base UI**
-- **shadcn**
-- theme bootstrapped from:
-  - `bunx shadcn create --preset buFzo92`
-- then adapted to match the theme conventions from `../stone/...`
+The route model stays:
+- `/` → Main
+- `/threads` → thread index
+- `/threads/:id` → thread chat
 
-## Session model
+---
 
-### Durable Object per session
+## Target execution topology
 
-Each session gets its own Durable Object.
+### Root sandbox for main
+The main thread should map to the canonical **root sandbox**.
 
-The DO is responsible for:
-- ordered command intake
-- streaming fanout to connected clients
-- sequence numbering of outbound events
-- short-term event buffering for reconnect/replay
-- session metadata like title/status/last activity
+That sandbox keeps:
+- main's Pi session history
+- main's local workspace state
+- main's local artifacts/processes
 
-### Concurrency model
+### Dedicated sandbox per side thread
+Each side thread should eventually map to its own sandbox.
 
-- **Many sessions may be active at the same time**
-- **One active agent run per session**
-- Within a session, commands are serialized
-- Between sessions, work can proceed independently
+That gives each thread:
+- isolated workspace files
+- isolated processes and local services
+- isolated Pi session history
+- clean room for project-specific work
 
-### Replay model
+### Why not share one sandbox across all threads?
+Because once workspace tools exist, sharing a sandbox would also share:
+- cwd
+- files
+- processes
+- temp artifacts
+- local services
 
-All streamed events should have:
-- `sessionId`
-- `seq`
-- `type`
-- payload
+That would make focused threads leak into each other. The right isolation boundary is **one sandbox per thread**.
 
-This enables reconnect and deterministic UI rebuilding.
+---
 
-## Transport
+## Tool model
 
-## v1 choice: HTTP + SSE
+### Shared tool surface
+All threads should feel like the same agent with the same general capabilities.
 
-Commands:
-- `POST /sessions`
-- `GET /sessions`
-- `GET /sessions/:id`
-- `POST /sessions/:id/prompt`
-- `POST /sessions/:id/steer`
-- `POST /sessions/:id/follow-up`
-- `POST /sessions/:id/abort`
+Shared/global capabilities include:
+- durable memory tools
+- thread-awareness tools
+- future browsing tools
+- future workflow/schedule tools
+- future MCP/custom remote tools
 
-Streaming:
-- `GET /sessions/:id/stream`
+### Thread-local workspace tools
+Workspace tools should exist in every thread, but operate inside that thread's sandbox.
 
-Why SSE first:
-- simpler than full-duplex WebSockets
-- easier to debug
-- fits the prompt/stream model well
-- plays nicely with Durable Object fanout/replay
+Examples:
+- read/search files
+- bash
+- write/edit files
+- git helpers
+- local servers/background processes
 
-WebSockets are still a reasonable future option if product needs become more interactive.
+So the product promise is:
+- **same capabilities**
+- **different local workspaces**
 
-## Memory and storage model
+---
 
-The first high-value custom tools should be **R2-backed memory tools**.
+## Transport model
 
-These are not a fake filesystem. They are a small, file-like object storage API used for:
-- memory
-- notes
-- artifacts
-- durable summaries
-- persistent project records
+### Current transport
+The current implementation uses:
+- HTTP commands
+- SSE streaming
+- replayable event envelopes
 
-### Initial storage tools
+This remains the near-term transport while the runtime is sandboxed.
 
-Expose these as Pi tools via a custom extension:
-- `memory_read(path)`
-- `memory_write(path, content)`
-- `memory_edit(path, oldText, newText)`
-- `memory_list(prefix?)`
-- `memory_append(path, content)`
+### Later transport/orchestration
+When orchestration moves to Agents, the transport may evolve to use:
+- Agent HTTP/SSE
+- Agent WebSockets
+- Agent state sync
 
-These should be the first non-trivial custom tools after basic chat/session plumbing.
+But Pi itself should still remain the execution engine behind that control plane.
 
-### Why separate memory from workspace files
+---
 
-Keep two different concepts:
-- **memory tools** → R2-backed, durable, app-defined storage
-- **workspace tools** → future local file/project editing in runtime
+## Cloudflare Agents plan
 
-This separation keeps safety and semantics clean.
+After the runtime is successfully sandboxed and thread-to-sandbox mapping is stable, move orchestration to **Cloudflare Agents**.
 
-### Suggested R2 key layout
+### What Agents should own later
+- thread registry / metadata
+- durable per-thread control-plane state
+- schedules and wakeups
+- workflows
+- browser-driven capabilities
+- MCP server/client integrations
+- richer live client sync
 
-```txt
-memory/profile.md
-memory/facts/user.md
-memory/notes/YYYY-MM-DD.md
-memory/projects/<slug>/todo.md
-memory/projects/<slug>/notes.md
-memory/sessions/<session-id>/summary.md
-artifacts/<session-id>/...
-```
+### What Agents should not replace
+Agents should not replace Pi's chat/session engine.
 
-### Concurrency strategy
+Pi already owns:
+- prompt handling
+- tool-use loop
+- steer / follow-up semantics
+- session history behavior
 
-For v1, use **optimistic concurrency**:
-- read object
-- capture version/etag
-- write with version check
-- if conflict occurs, surface it cleanly and let the agent retry
+So the likely later shape is:
+- **Agents** = control plane
+- **Pi in Sandbox** = execution plane
 
-Avoid building a fake POSIX abstraction on top of R2.
+### Important design choice
+Use the base **`Agent`** model later, not `AIChatAgent`.
 
-## Pi integration strategy
+Reason:
+- `AIChatAgent` overlaps too much with Pi's own message/session model
+- Bruh should avoid having two competing chat/session engines
 
-### Use Pi SDK directly
-
-Use:
-- `createAgentSession()`
-- `DefaultResourceLoader`
-- project-local `.pi/extensions/`
-- Pi's built-in tools selectively
-
-### Start with restricted/default-safe tools
-
-Start minimal. Then add power deliberately.
-
-Likely sequence:
-1. core agent prompt/stream flow
-2. memory tools
-3. read-only workspace tools
-4. controlled bash/edit/write later
-
-### Extensions are the customization layer
-
-Pi extensions should be used for:
-- custom memory tools
-- storage helpers
-- safety rails / permission policies
-- future workspace/file helpers
-- future integrations
-
-## UI direction
-
-Take architecture inspiration from Pi's `web-ui` package where useful, but build a thinner, product-specific app.
-
-Core UI areas:
-- chat transcript
-- composer
-- tool activity/status
-- session list
-- settings later
-
-Do **not** attempt to reproduce Pi's TUI in the browser.
-
-## Non-goals for early versions
-
-Do not prioritize these early:
-- remote Pi TUI in browser
-- browser/CDP emulation
-- bot/channel integrations
-- pretending R2 is a full filesystem
-- multi-tenant design
-- heavy dashboards before core chat works
+---
 
 ## Delivery phases
 
-### Phase 0 — foundation
+### Phase 0 — foundation (done / mostly done)
 - repo scaffolding
-- edge/runtime/web skeletons
-- shadcn/Base UI theme bootstrap
-- basic deploy path for runtime and edge
+- web chat app
+- Worker + DO session orchestration
+- Pi SDK runtime
+- R2 memory tools
+- thread summaries and steer/follow-up
 
-### Phase 1 — usable chat system
-- session creation/listing
-- `SessionDO`
-- runtime Pi integration
-- prompt + stream flow
-- basic web chat
-- durable session state/events
+### Phase 1 — sandbox the runtime (next)
+- package `runtime/` for Cloudflare Sandbox
+- run the existing Pi runtime inside Sandbox
+- keep current edge/web flow intact while migrating
+- verify Pi, Anthropic, memory tools, and summaries all work in Sandbox
 
-### Phase 2 — durable memory
-- R2 internal storage API in edge
-- memory extension in runtime
-- read/write/edit/list/append memory tools
-- profile + notes + session-summary conventions
+### Phase 2 — align sandbox identity with thread identity
+- `main` → root sandbox
+- side thread → dedicated sandbox
+- isolate workspace files/processes/Pi session history per thread
+- keep R2 memory shared across all threads
 
-### Phase 3 — controlled power
-- restricted local workspace tools
-- better safety rails
-- session replay/resume polish
-- project memory patterns
+### Phase 3 — add workspace power
+- controlled workspace file tools
+- shell/search/git helpers
+- background processes and local services when needed
 
-### Phase 4 — optional expansion
-- mobile client
-- richer tooling
-- browser helpers
-- notifications
+### Phase 4 — migrate orchestration to Agents
+- replace custom thread/session orchestration with Cloudflare Agents
+- use one Agent instance per thread
+- keep Pi in Sandbox as the execution engine
+
+### Phase 5 — add cloud-native capabilities
+- browsing
+- schedules
+- workflows
+- MCP/custom tool surfaces
+- richer approvals / notifications / automation
+
+---
 
 ## Current decision summary
 
-- **Pi SDK** over RPC for v1
-- **SSE** over WebSockets for v1
-- **Durable Object per session**
-- **R2-backed memory tools** as an early core feature
-- **React + Vite + Base UI + shadcn** for web
-- bootstrap theme with `bunx shadcn create --preset buFzo92`
-- adapt styling/theme direction from `../stone/...`
+- **Pi SDK** over Pi emulation
+- **R2-backed memory** as the durable cross-thread memory layer
+- **sandbox filesystem** for actual Pi session history and workspace state
+- **root sandbox for main**
+- **dedicated sandbox per side thread**
+- **same memory, same tool surface, isolated local workspaces**
+- **current Worker + DO control plane is transitional**
+- **Cloudflare Agents is the long-term orchestration layer**
+- use base **`Agent`**, not `AIChatAgent`, when that migration happens
+
+---
 
 ## North-star outcome
 
 The end result should feel like:
-- a personal Pi-powered agent
-- hosted on Cloudflare
-- simple, durable, and safe
-- with first-class memory and session continuity
-- and a light UI built specifically for how we want to use it
+- one personal Pi-powered agent named **Bruh**
+- a canonical main thread with a real home workspace
+- side threads that act like focused branches, not separate bots
+- shared durable memory across the whole system
+- sandboxed execution power where workspace tools can safely grow
+- Cloudflare-native orchestration for scheduling, workflows, browsing, and MCP

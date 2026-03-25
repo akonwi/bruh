@@ -12,13 +12,15 @@ export interface RuntimeConfig {
 }
 
 export async function loadConfig(): Promise<RuntimeConfig> {
-  const cwd = process.cwd();
-  const agentDir = path.resolve(cwd, '.data/pi-agent');
+  const cwd = path.resolve(process.env.BRUH_RUNTIME_CWD?.trim() || process.cwd());
+  const agentDir = path.resolve(
+    process.env.BRUH_RUNTIME_AGENT_DIR?.trim() || path.join(cwd, '.data/pi-agent'),
+  );
   await mkdir(agentDir, { recursive: true });
 
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY is required to run the Pi runtime locally.');
+    throw new Error('ANTHROPIC_API_KEY is required to run the Pi runtime.');
   }
 
   return {
@@ -27,7 +29,7 @@ export async function loadConfig(): Promise<RuntimeConfig> {
     cwd,
     agentDir,
     anthropicApiKey,
-    anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-20250514',
+    anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || 'claude-opus-4-6',
     internalApiSecret: process.env.INTERNAL_API_SECRET?.trim() || undefined,
   };
 }

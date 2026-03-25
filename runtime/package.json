@@ -3,12 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "wrangler dev --config wrangler.jsonc --port 8788",
+    "dev:local": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "sandbox:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cloudflare/sandbox": "^0.7.20",
     "@hono/node-server": "^1.19.0",
     "@mariozechner/pi-coding-agent": "^0.62.0",
     "@sinclair/typebox": "^0.34.48",
@@ -17,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.77.0"
   }
 }

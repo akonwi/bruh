@@ -3,7 +3,6 @@ import path from 'node:path';
 import {
   AuthStorage,
   createAgentSession,
-  createReadOnlyTools,
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
@@ -12,19 +11,25 @@ import {
   type AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
 import type { RuntimeConfig } from './config.js';
+import { ensureThreadWorkspace } from './workspace.js';
 
 interface PublishInput {
   type: string;
   payload: Record<string, unknown>;
 }
 
-function extractAssistantText(message: unknown): string {
+interface ConversationMessage {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+function extractMessageText(message: unknown, role: 'assistant' | 'user'): string {
   const candidate = message as {
     role?: string;
     content?: Array<{ type?: string; text?: string }> | string;
   };
 
-  if (candidate?.role !== 'assistant') {
+  if (candidate?.role !== role) {
     return '';
   }
 
@@ -40,6 +45,14 @@ function extractAssistantText(message: unknown): string {
     .filter((part) => part?.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text)
     .join('');
+}
+
+function extractAssistantText(message: unknown): string {
+  return extractMessageText(message, 'assistant');
+}
+
+function extractUserText(message: unknown): string {
+  return extractMessageText(message, 'user');
 }
 
 function extractAssistantTextFromMessages(messages: unknown[]): string {
@@ -69,6 +82,75 @@ function extractAssistantStopReasonFromMessages(messages: unknown[]): string | u
     if (stopReason) return stopReason;
   }
   return undefined;
+}
+
+function collectRecentConversation(messages: unknown[], limit = 10): ConversationMessage[] {
+  const conversation: ConversationMessage[] = [];
+
+  for (const message of messages) {
+    const userText = extractUserText(message);
+    if (userText) {
+      conversation.push({ role: 'user', text: userText });
+    }
+
+    const assistantText = extractAssistantText(message);
+    if (assistantText) {
+      conversation.push({ role: 'assistant', text: assistantText });
+    }
+  }
+
+  return conversation.slice(-limit);
+}
+
+function truncateSummaryText(text: string, maxChars = 3000): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, maxChars).trimEnd()}\n\n[Truncated to ${maxChars} characters for the rolling session summary.]`;
+}
+
+function formatSummarySectionText(text?: string): string {
+  const normalized = text?.trim();
+  if (!normalized) {
+    return '(none yet)';
+  }
+
+  return `~~~text\n${truncateSummaryText(normalized)}\n~~~`;
+}
+
+function formatSessionSummary(sessionId: string, messages: unknown[]): string | null {
+  const conversation = collectRecentConversation(messages, 10);
+  if (conversation.length === 0) {
+    return null;
+  }
+
+  const latestUser = [...conversation].reverse().find((message) => message.role === 'user')?.text;
+  const latestAssistant = [...conversation].reverse().find((message) => message.role === 'assistant')?.text;
+  const updatedAt = new Date().toISOString();
+
+  const lines = [
+    '# Session Summary',
+    '',
+    `- Session ID: ${sessionId}`,
+    `- Last updated: ${updatedAt}`,
+    '- Generated automatically by the runtime after a run ends.',
+    '- This is a rolling snapshot, not a full transcript.',
+    '',
+    '## Latest user message',
+    formatSummarySectionText(latestUser),
+    '',
+    '## Latest assistant message',
+    formatSummarySectionText(latestAssistant),
+    '',
+    '## Recent conversation',
+  ];
+
+  for (const entry of conversation) {
+    lines.push('', `### ${entry.role === 'user' ? 'User' : 'Assistant'}`, formatSummarySectionText(entry.text));
+  }
+
+  return lines.join('\n');
 }
 
 function isAbortLikeError(error: unknown): boolean {
@@ -218,6 +300,10 @@ export class PiSessionRegistry {
             type: 'session.status',
             payload: { status: 'idle' },
           });
+
+          void this.persistSessionSummary(sessionId, managed.session.messages).catch((error) => {
+            console.error(`[runtime] failed to persist session summary for ${sessionId}`, error);
+          });
         }
       });
   }
@@ -238,7 +324,8 @@ export class PiSessionRegistry {
   }
 
   private async createSession(sessionId: string): Promise<AgentSession> {
-    const cwd = this.config.cwd;
+    const workspaceRoot = await ensureThreadWorkspace(this.config.cwd, sessionId);
+    const cwd = workspaceRoot;
     const agentDir = this.config.agentDir;
     const authPath = path.join(agentDir, 'auth.json');
     await mkdir(agentDir, { recursive: true });
@@ -285,7 +372,7 @@ export class PiSessionRegistry {
       resourceLoader,
       settingsManager,
       sessionManager: SessionManager.inMemory(),
-      tools: createReadOnlyTools(cwd),
+      tools: [],
     });
 
     session.subscribe((event) => {
@@ -300,6 +387,7 @@ export class PiSessionRegistry {
         provider: model.provider,
         modelId: model.id,
         requestedModelId: this.config.anthropicModel,
+        workspaceRoot,
       },
     });
 
@@ -390,6 +478,40 @@ export class PiSessionRegistry {
         return;
       default:
         return;
+    }
+  }
+
+  private async persistSessionSummary(sessionId: string, messages: unknown[]): Promise<void> {
+    const content = formatSessionSummary(sessionId, messages);
+    if (!content) {
+      return;
+    }
+
+    await this.putMemoryObject(`sessions/${sessionId}/summary.md`, content);
+  }
+
+  private async putMemoryObject(relativePath: string, content: string): Promise<void> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.config.internalApiSecret) {
+      headers['X-Bruh-Internal-Secret'] = this.config.internalApiSecret;
+    }
+
+    const search = new URLSearchParams({ path: `memory/${relativePath}` });
+    const response = await fetch(`${this.config.edgeBaseUrl}/internal/storage/object?${search.toString()}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        content,
+        contentType: 'text/markdown; charset=utf-8',
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Failed to write memory/${relativePath}: ${response.status} ${body}`.trim());
     }
   }
 
