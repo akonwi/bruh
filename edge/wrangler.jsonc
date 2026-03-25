@@ -28,7 +28,7 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      "image": "ghcr.io/cloudflare/sandbox:latest",
+      "image": "./Dockerfile",
       "instance_type": "lite",
       "max_instances": 5
     }
