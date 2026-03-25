@@ -633,8 +633,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         }),
         execute: async ({ path }) => {
           const sandbox = agent.getSandbox();
-          const result = await sandbox.readFile(path);
-          return result.content;
+          const file = await sandbox.readFile(path);
+          return file.content;
         },
       }),
 
@@ -688,12 +688,14 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         }),
         execute: async ({ url, branch, targetDir }) => {
           const sandbox = agent.getSandbox();
-          const result = await sandbox.gitCheckout(url, {
+          const repoName = url.replace(/\.git$/, '').split('/').pop() || 'repo';
+          const dest = targetDir || `/workspace/${repoName}`;
+          await sandbox.gitCheckout(url, {
             branch,
-            targetDir: targetDir || undefined,
+            targetDir: dest,
             depth: 1,
           });
-          return `Cloned ${url}${branch ? ` (branch: ${branch})` : ''} to ${result.targetDir ?? targetDir ?? '/workspace'}`;
+          return `Cloned ${url}${branch ? ` (branch: ${branch})` : ''} to ${dest}`;
         },
       }),
     };
