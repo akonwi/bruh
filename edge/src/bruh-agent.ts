@@ -474,20 +474,36 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
               options.transport = { headers };
             }
 
-            console.log(`[MCP] addMcpServer("${name}", "${url}", ${JSON.stringify(options)})`);
             const result = await agent.addMcpServer(name, url, options);
-            console.log(`[MCP] addMcpServer result:`, JSON.stringify(result));
 
-            if (result.state === 'authenticating') {
-              return `🔐 Server "${name}" requires OAuth authorization.\n\nPlease visit this URL to authorize:\n${result.authUrl}\n\nOnce authorized, the server's tools will become available.`;
+            // addMcpServer may return "ready" before the async connection settles.
+            // Wait briefly then check the actual server state.
+            await new Promise(r => setTimeout(r, 3000));
+            const state = agent.getMcpServers();
+            const server = Object.values(state.servers).find(s => s.name === name);
+
+            if (server?.state === 'authenticating' && server.auth_url) {
+              return `🔐 Server "${name}" requires OAuth authorization.\n\nPlease visit this URL to authorize:\n${server.auth_url}\n\nOnce authorized, the server's tools will become available on the next message.`;
             }
 
-            return `Connected to MCP server: ${name} (id: ${result.id}). Its tools will be available on the next message.`;
+            if (server?.state === 'authenticating') {
+              return `🔐 Server "${name}" requires OAuth but no authorization URL was provided. The server may need additional configuration.`;
+            }
+
+            if (server?.state === 'failed') {
+              return `Failed to connect to "${name}": ${server.error || 'unknown error'}`;
+            }
+
+            if (server?.state === 'ready') {
+              const toolCount = state.tools?.filter(t => t.serverId === result.id).length ?? 0;
+              return `Connected to MCP server: ${name} (${toolCount} tools available).`;
+            }
+
+            // Still connecting/discovering — let the user know
+            return `Connecting to "${name}" (state: ${server?.state ?? 'unknown'}). Tools will be available once the server is ready.`;
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
-            const errStack = e instanceof Error ? e.stack : undefined;
             console.error(`[MCP] addMcpServer failed:`, errMsg);
-            if (errStack) console.error(`[MCP] stack:`, errStack);
             return `Failed to connect: ${errMsg}`;
           }
         },
