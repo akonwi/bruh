@@ -344,7 +344,8 @@ export class BruhAgent extends Agent<BruhEnv, BruhState> {
   }
 
   private handleMcpListTools(): Response {
-    const tools = this.mcp.listTools().map((tool) => ({
+    const state = this.getMcpServers();
+    const tools = (state.tools ?? []).map((tool) => ({
       name: tool.name,
       description: tool.description,
       serverId: tool.serverId,
