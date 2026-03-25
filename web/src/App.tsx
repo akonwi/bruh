@@ -19,6 +19,7 @@ import { MessageMarkdown } from '@/components/message-markdown'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
   createSession,
@@ -177,12 +178,12 @@ function ChatView({ sessionId }: { sessionId: string }) {
           ) : null}
 
           <div className='border bg-card shadow-sm'>
-            <textarea
+            <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={sessionId === MAIN_SESSION_ID ? 'Message Main…' : 'Message this thread…'}
-              className='min-h-24 w-full resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground/80 sm:text-[15px]'
+              className='min-h-24 resize-none border-0 text-sm sm:text-[15px]'
             />
             <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
               <div className='min-w-0 text-xs text-muted-foreground'>
