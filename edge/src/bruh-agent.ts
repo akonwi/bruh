@@ -289,7 +289,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         if (config.authEnvVar) {
           const token = this.env[config.authEnvVar]
           if (typeof token === 'string' && token.trim()) {
-            transportHeaders['Authorization'] = `Bearer ${token.trim()}`
+            transportHeaders.Authorization = `Bearer ${token.trim()}`
           }
         }
 
