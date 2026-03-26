@@ -7,6 +7,7 @@ import type { UIMessage } from 'ai'
 import {
   convertToModelMessages,
   generateText,
+  isToolUIPart,
   jsonSchema,
   type StreamTextOnFinishCallback,
   stepCountIs,
@@ -26,22 +27,24 @@ function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
     .map((msg) => {
       if (msg.role !== 'assistant' || !msg.parts) return msg
 
-      const hasToolCall = msg.parts.some(
-        (p: any) =>
-          typeof p.type === 'string' &&
-          p.type.startsWith('tool-') &&
-          (p.state === 'call' || p.state === 'partial-call'),
+      const hasIncompleteToolCall = msg.parts.some(
+        (part) =>
+          isToolUIPart(part) &&
+          part.state !== 'output-available' &&
+          part.state !== 'output-error' &&
+          part.state !== 'output-denied',
       )
 
-      if (!hasToolCall) return msg
+      if (!hasIncompleteToolCall) return msg
 
-      // Strip incomplete tool invocations (call without result)
-      const cleanParts = msg.parts.filter((p: any) => {
-        if (typeof p.type === 'string' && p.type.startsWith('tool-')) {
-          return p.state === 'result' || p.state === 'output-available'
-        }
-        return true
-      })
+      // Strip incomplete tool invocations (calls without terminal output state)
+      const cleanParts = msg.parts.filter(
+        (part) =>
+          !isToolUIPart(part) ||
+          part.state === 'output-available' ||
+          part.state === 'output-error' ||
+          part.state === 'output-denied',
+      )
 
       return { ...msg, parts: cleanParts }
     })
