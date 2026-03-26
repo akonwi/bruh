@@ -9,8 +9,6 @@
 
 :root {
   font-family: system-ui, sans-serif;
-  color: #111827;
-  background: #ffffff;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

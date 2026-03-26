@@ -1,4 +1,5 @@
-import { ChatsTeardrop, House, Lightning, Plus, WarningCircle } from '@phosphor-icons/react'
+import { ChatsTeardrop, House, Lightning, Moon, Plus, Sun, WarningCircle } from '@phosphor-icons/react'
+import type { Theme } from '@/hooks/use-theme'
 
 import {
   Sidebar,
@@ -33,6 +34,8 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   isCreating: boolean
   mcpServers: McpServerInfo[]
   mcpToolCount: number
+  theme: Theme
+  onThemeChange: (theme: Theme) => void
 }
 
 function SidebarHeaderContent({ onNavigateMain }: { onNavigateMain: () => void }) {
@@ -92,10 +95,18 @@ export function AppSidebar({
   isCreating,
   mcpServers,
   mcpToolCount,
+  theme,
+  onThemeChange,
   ...props
 }: AppSidebarProps) {
   const { state } = useSidebar()
   const collapsed = state === 'collapsed'
+
+  const cycleTheme = () => {
+    const order: Theme[] = ['system', 'light', 'dark']
+    const next = order[(order.indexOf(theme) + 1) % order.length]
+    onThemeChange(next)
+  }
 
   return (
     <Sidebar collapsible='icon' {...props}>
@@ -128,8 +139,8 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      {!collapsed && mcpServers.length > 0 ? (
-        <SidebarFooter>
+      <SidebarFooter>
+        {!collapsed && mcpServers.length > 0 ? (
           <SidebarGroup>
             <SidebarGroupLabel className='flex items-center gap-1.5'>
               <Lightning className='size-3' />
@@ -144,8 +155,28 @@ export function AppSidebar({
               ))}
             </div>
           </SidebarGroup>
-        </SidebarFooter>
-      ) : null}
+        ) : null}
+
+        {!collapsed ? (
+          <div className='flex items-center justify-between px-2 py-1'>
+            <button
+              onClick={cycleTheme}
+              className='flex items-center gap-2 text-xs text-sidebar-foreground/70 hover:text-sidebar-foreground transition-colors'
+            >
+              {theme === 'dark' ? <Moon className='size-3.5' /> : <Sun className='size-3.5' />}
+              <span className='capitalize'>{theme}</span>
+            </button>
+          </div>
+        ) : (
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip={`Theme: ${theme}`} onClick={cycleTheme}>
+                {theme === 'dark' ? <Moon /> : <Sun />}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        )}
+      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>
