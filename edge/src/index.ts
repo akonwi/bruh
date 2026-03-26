@@ -121,6 +121,16 @@ app.patch('/sessions/:sessionId', async (c) => {
   )
 })
 
+app.post('/sessions/:sessionId/refresh-context', async (c) => {
+  const sessionId = c.req.param('sessionId')
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId)
+  return stub.fetch(
+    new Request('https://agent/refresh-context', {
+      method: 'POST',
+    }),
+  )
+})
+
 // --- SSE streaming (legacy event system for current web app) ---
 
 app.get('/sessions/:sessionId/events', async (c) => {

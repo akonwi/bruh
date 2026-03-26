@@ -107,6 +107,8 @@ interface BruhState {
   latestSeq: number
   clientTimeZone?: string
   clientNowIso?: string
+  contextSummary?: string
+  contextRefreshedAt?: string
 }
 
 type SandboxListFileEntry = NonNullable<
@@ -205,6 +207,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     latestSeq: 0,
     clientTimeZone: undefined,
     clientNowIso: undefined,
+    contextSummary: undefined,
+    contextRefreshedAt: undefined,
   }
 
   // Wait up to 10s for MCP servers to connect before handling chat messages
@@ -1441,6 +1445,127 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     }
   }
 
+  private isMainThread(): boolean {
+    const sessionId = this.state.sessionId || this.name
+    return sessionId === 'main'
+  }
+
+  private getSystemPrompt(): string {
+    const summary = this.state.contextSummary?.trim()
+    if (!summary) return SYSTEM_PROMPT
+
+    const refreshedAt = this.state.contextRefreshedAt
+      ? `\nCheckpointed at: ${this.state.contextRefreshedAt}`
+      : ''
+
+    return `${SYSTEM_PROMPT}\n\n## Checkpoint context${refreshedAt}\n${summary}`
+  }
+
+  private async buildFallbackSummary(): Promise<string> {
+    const lines: string[] = []
+    for (const msg of this.messages.slice(-20)) {
+      const role = msg.role === 'assistant' ? 'Assistant' : 'User'
+      const textPart = msg.parts?.find((p) => p.type === 'text')
+      if (textPart && 'text' in textPart && textPart.text.trim()) {
+        const text = textPart.text.replace(/\s+/g, ' ').trim().slice(0, 220)
+        lines.push(`- ${role}: ${text}`)
+      }
+    }
+    return lines.length > 0
+      ? `Conversation summary:\n${lines.join('\n')}`
+      : 'Conversation summary unavailable.'
+  }
+
+  private async refreshContext(mode: 'auto' | 'manual'): Promise<void> {
+    const now = new Date().toISOString()
+    const isMain = this.isMainThread()
+    const kept = this.messages.slice(-(isMain ? 4 : 2))
+
+    let contextSummary: string | undefined
+    if (!isMain) {
+      const sessionId = this.state.sessionId || this.name
+      if (sessionId) {
+        const object = await this.env.MEMORY_BUCKET.get(
+          `memory/sessions/${sessionId}/summary.md`,
+        )
+        const summaryText = object ? (await object.text()).trim() : ''
+        contextSummary = summaryText || (await this.buildFallbackSummary())
+        if (contextSummary.length > 4000) {
+          contextSummary = `${contextSummary.slice(0, 4000)}…`
+        }
+      }
+    }
+
+    this.messages = kept
+    await this.saveMessages(this.messages)
+
+    this.setState({
+      ...this.state,
+      contextSummary,
+      contextRefreshedAt: now,
+      updatedAt: now,
+    })
+
+    console.log(
+      `[BruhAgent] Context refreshed (${mode}) for ${isMain ? 'main' : 'thread'}; kept ${kept.length} messages`,
+    )
+  }
+
+  private async buildModelMessages(): Promise<
+    Awaited<ReturnType<typeof convertToModelMessages>>
+  > {
+    const rawModelMessages = await convertToModelMessages(
+      sanitizeMessages(this.messages),
+    )
+
+    const isMain = this.isMainThread()
+    const contextBudget = isMain ? 16_000 : 24_000
+
+    const estimateTokens = (
+      messages: Awaited<ReturnType<typeof convertToModelMessages>>,
+    ): number => Math.ceil(JSON.stringify(messages).length / 4)
+
+    const prunedModelMessages = pruneMessages({
+      messages: rawModelMessages,
+      reasoning: 'all',
+      toolCalls: isMain ? 'all' : 'before-last-6-messages',
+      emptyMessages: 'remove',
+    })
+
+    let modelMessages = prunedModelMessages.slice(-(isMain ? 12 : 20))
+    const ratio = estimateTokens(modelMessages) / contextBudget
+
+    // Auto-refresh when context is ~85% full.
+    if (ratio >= 0.85) {
+      await this.refreshContext('auto')
+
+      const refreshedRawMessages = await convertToModelMessages(
+        sanitizeMessages(this.messages),
+      )
+      const refreshedPruned = pruneMessages({
+        messages: refreshedRawMessages,
+        reasoning: 'all',
+        toolCalls: isMain ? 'all' : 'before-last-4-messages',
+        emptyMessages: 'remove',
+      })
+      modelMessages = refreshedPruned.slice(-(isMain ? 8 : 14))
+
+      // Fallback safeguard if still large after refresh.
+      const refreshedRatio = estimateTokens(modelMessages) / contextBudget
+      if (refreshedRatio >= 0.85) {
+        const fallbackPruned = pruneMessages({
+          messages: modelMessages,
+          reasoning: 'all',
+          toolCalls: 'all',
+          emptyMessages: 'remove',
+        })
+        modelMessages = fallbackPruned.slice(-(isMain ? 6 : 10))
+      }
+    }
+
+    return modelMessages
+  }
+
   // --- AIChatAgent: the agent loop ---
 
   async onChatMessage(
@@ -1479,16 +1604,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       }
     }
 
-    const rawModelMessages = await convertToModelMessages(
-      sanitizeMessages(this.messages),
-    )
-    const prunedModelMessages = pruneMessages({
-      messages: rawModelMessages,
-      reasoning: 'all',
-      toolCalls: 'before-last-8-messages',
-      emptyMessages: 'remove',
-    })
-    const modelMessages = prunedModelMessages.slice(-24)
+    const modelMessages = await this.buildModelMessages()
 
     // Wrap onFinish to auto-write session summary
     const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (
@@ -1502,7 +1618,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     const result = streamText({
       model,
       messages: modelMessages,
-      system: SYSTEM_PROMPT,
+      system: this.getSystemPrompt(),
       tools,
       stopWhen: stepCountIs(10),
       onFinish: wrappedOnFinish,
@@ -1582,7 +1698,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       const result = await generateText({
         model,
         prompt: prompt,
-        system: `${SYSTEM_PROMPT}\n\nYou are executing a scheduled task. Carry out the task and report the result concisely. The user will see your response in their chat transcript.`,
+        system: `${this.getSystemPrompt()}\n\nYou are executing a scheduled task. Carry out the task and report the result concisely. The user will see your response in their chat transcript.`,
         tools,
         stopWhen: stepCountIs(10),
       })
@@ -1647,6 +1763,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         return this.handleRegisterThread(request)
       case 'POST /rename':
         return this.handleRenameThread(request)
+      case 'POST /refresh-context':
+        return this.handleRefreshContext()
       case 'GET /threads':
         return this.handleListThreads()
       // Legacy event system (remove once web app fully migrated)
@@ -1700,21 +1818,12 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     const model = this.getModel()
     const tools = this.getRuntimeTools(true)
-    const rawModelMessages = await convertToModelMessages(
-      sanitizeMessages(this.messages),
-    )
-    const prunedModelMessages = pruneMessages({
-      messages: rawModelMessages,
-      reasoning: 'all',
-      toolCalls: 'before-last-8-messages',
-      emptyMessages: 'remove',
-    })
-    const modelMessages = prunedModelMessages.slice(-24)
+    const modelMessages = await this.buildModelMessages()
 
     const result = streamText({
       model,
       messages: modelMessages,
-      system: SYSTEM_PROMPT,
+      system: this.getSystemPrompt(),
       tools,
       stopWhen: stepCountIs(10),
       onFinish: async (event) => {
@@ -1858,6 +1967,14 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     })
 
     return Response.json(this.toMetadata())
+  }
+
+  private async handleRefreshContext(): Promise<Response> {
+    await this.refreshContext('manual')
+    return Response.json({
+      ok: true,
+      refreshedAt: this.state.contextRefreshedAt ?? new Date().toISOString(),
+    })
   }
 
   private handleListThreads(): Response {

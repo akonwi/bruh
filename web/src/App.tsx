@@ -41,6 +41,7 @@ import {
   followUpSession,
   getMainSession,
   listSessions,
+  refreshSessionContext,
   renameSession,
   type SessionState,
   steerSession,
@@ -130,6 +131,14 @@ function getMessageCreatedAt(message: UIMessage): string | Date | undefined {
   return undefined
 }
 
+function estimateContextTokens(messages: UIMessage[]): number {
+  const chars = messages.reduce(
+    (sum, message) => sum + JSON.stringify(message).length,
+    0,
+  )
+  return Math.ceil(chars / 4)
+}
+
 // --- Chat view using useAgentChat ---
 
 function ChatView({
@@ -154,6 +163,19 @@ function ChatView({
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
   const isLoading = status === 'streaming' || status === 'submitted'
+
+  const contextTokenEstimate = useMemo(
+    () => estimateContextTokens(messages),
+    [messages],
+  )
+  const contextBudget = sessionId === MAIN_SESSION_ID ? 16_000 : 24_000
+  const contextRatio = Math.min(contextTokenEstimate / contextBudget, 1)
+  const contextTone =
+    contextRatio >= 0.85
+      ? 'text-destructive'
+      : contextRatio >= 0.8
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-muted-foreground'
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageEndRef = useRef<HTMLDivElement | null>(null)
@@ -202,6 +224,20 @@ function ChatView({
     if (!ok) return
     clearHistory()
   }, [clearHistory])
+
+  const handleRefreshContext = useCallback(async () => {
+    const ok = window.confirm(
+      'Refresh context for this thread? It will keep only the latest turns and checkpoint prior context.',
+    )
+    if (!ok) return
+
+    try {
+      await refreshSessionContext(sessionId)
+      window.location.reload()
+    } catch (e) {
+      console.error('Failed to refresh context:', e)
+    }
+  }, [sessionId])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -290,8 +326,19 @@ function ChatView({
             />
             <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
               <div className='min-w-0 text-xs text-muted-foreground'>
+                <div className='flex flex-wrap items-center gap-2'>
+                  {contextRatio >= 0.85 ? (
+                    <span className={contextTone}>
+                      Context window {'>'}=85% — auto-refreshing context.
+                    </span>
+                  ) : contextRatio >= 0.8 ? (
+                    <span className={contextTone}>
+                      Context window {'>'}=80% — nearing limit.
+                    </span>
+                  ) : null}
+                </div>
                 {isLoading ? (
-                  <div className='flex flex-wrap items-center gap-2'>
+                  <div className='mt-1 flex flex-wrap items-center gap-2'>
                     <span>Bruh is responding…</span>
                     <div className='flex items-center gap-1'>
                       <Button
@@ -317,6 +364,13 @@ function ChatView({
                 ) : null}
               </div>
               <div className='flex items-center gap-2'>
+                <Button
+                  variant='outline'
+                  onClick={handleRefreshContext}
+                  disabled={isLoading || messages.length === 0}
+                >
+                  Refresh context
+                </Button>
                 <Button
                   variant='outline'
                   onClick={handleClearHistory}

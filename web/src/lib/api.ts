@@ -57,6 +57,14 @@ export async function renameSession(
   return response.json()
 }
 
+export async function refreshSessionContext(sessionId: string): Promise<void> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}/refresh-context`), {
+    method: 'POST',
+  })
+  if (!response.ok)
+    throw new Error(`Failed to refresh context: ${response.status}`)
+}
+
 export async function steerSession(
   sessionId: string,
   text: string,
