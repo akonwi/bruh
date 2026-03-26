@@ -78,7 +78,7 @@ class ToolError extends Error {
 // --- Env & State ---
 
 interface BruhEnv {
-  BRUH_AGENT: DurableObjectNamespace
+  BRUH_AGENT: DurableObjectNamespace<BruhAgent>
   SANDBOX: DurableObjectNamespace<Sandbox>
   MEMORY_BUCKET: R2Bucket
   ANTHROPIC_API_KEY?: string
@@ -657,7 +657,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         execute: async () => {
           try {
             const registryStub = await getAgentByName(
-              env.BRUH_AGENT as any,
+              env.BRUH_AGENT,
               '__registry__',
             )
             const response = await registryStub.fetch(
