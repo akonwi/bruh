@@ -418,15 +418,23 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           required: ['prompt'],
         }),
         execute: async ({ prompt, delaySeconds, scheduledAt }) => {
-          const when = scheduledAt
-            ? new Date(scheduledAt)
-            : delaySeconds && delaySeconds > 0
-              ? delaySeconds
-              : null;
+          let when: Date | number | null = null;
+          if (scheduledAt) {
+            const date = new Date(scheduledAt);
+            if (isNaN(date.getTime())) return 'Error: invalid scheduledAt date format. Use ISO 8601 (e.g. 2026-03-26T10:00:00Z)';
+            if (date.getTime() <= Date.now()) return 'Error: scheduledAt must be in the future';
+            when = date;
+          } else if (delaySeconds && delaySeconds > 0) {
+            when = delaySeconds;
+          }
           if (!when) return 'Error: provide delaySeconds or scheduledAt';
           const payload = JSON.stringify({ prompt });
-          const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
-          return `Scheduled one-time task (id: ${schedule.id}): "${prompt}"`;
+          try {
+            const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
+            return `Scheduled one-time task (id: ${schedule.id}): "${prompt}"`;
+          } catch (e) {
+            return `Error scheduling task: ${e instanceof Error ? e.message : e}`;
+          }
         },
       }),
 
@@ -441,10 +449,14 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           required: ['prompt', 'intervalSeconds'],
         }),
         execute: async ({ prompt, intervalSeconds }) => {
-          if (intervalSeconds < 10) return 'Error: intervalSeconds must be at least 10';
+          if (!intervalSeconds || intervalSeconds < 10) return 'Error: intervalSeconds must be at least 10';
           const payload = JSON.stringify({ prompt });
-          const schedule = await agent.scheduleEvery(intervalSeconds, 'executeScheduledTask', payload);
-          return `Scheduled recurring task every ${intervalSeconds}s (id: ${schedule.id}): "${prompt}"`;
+          try {
+            const schedule = await agent.scheduleEvery(intervalSeconds, 'executeScheduledTask', payload);
+            return `Scheduled recurring task every ${intervalSeconds}s (id: ${schedule.id}): "${prompt}"`;
+          } catch (e) {
+            return `Error scheduling task: ${e instanceof Error ? e.message : e}`;
+          }
         },
       }),
 
