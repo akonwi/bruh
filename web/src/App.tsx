@@ -310,11 +310,10 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
   // rawToolName already has the full namespaced name — formatToolName handles the lookup
   const toolName = formatToolName(rawToolName, mcpServerNames)
 
-  // AI SDK v6: states are 'call', 'partial-call', 'result', 'output-available', etc.
-  // Properties: input (not args), output (not result)
-  const isRunning = part.state === 'call' || part.state === 'partial-call'
-  const isDone = part.state === 'result' || part.state === 'output-available'
-  const isError = isDone && typeof (part.output ?? part.result) === 'string' && (part.output ?? part.result)?.startsWith('Error:')
+  // AI SDK v6 tool states: call, partial-call, input-streaming, output-available, output-error, output-denied
+  const isRunning = part.state === 'call' || part.state === 'partial-call' || part.state === 'input-streaming'
+  const isError = part.state === 'output-error' || part.state === 'output-denied'
+  const isDone = part.state === 'output-available' || isError
 
   const panelTone = isRunning
     ? 'border-border bg-muted/35'
@@ -328,7 +327,7 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
       ? 'text-destructive'
       : 'text-emerald-600 dark:text-emerald-300'
 
-  const rawOutput = part.output ?? part.result
+  const rawOutput = isError ? (part.errorText ?? part.output ?? part.result) : (part.output ?? part.result)
   const resultText = isDone && rawOutput != null
     ? typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
     : null
