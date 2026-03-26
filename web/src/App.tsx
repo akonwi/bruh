@@ -6,8 +6,6 @@ import {
   ArrowSquareOut,
   CaretRight,
   CheckCircle,
-  ClockCounterClockwise,
-  Plus,
   SpinnerGap,
   StopCircle,
   WarningCircle,
@@ -47,12 +45,10 @@ interface McpState {
 
 type AppRoute =
   | { kind: 'main' }
-  | { kind: 'threads' }
   | { kind: 'thread'; sessionId: string }
 
 function parseRoute(pathname: string): AppRoute {
   if (pathname === '/' || pathname === '') return { kind: 'main' }
-  if (pathname === '/threads') return { kind: 'threads' }
   const threadMatch = pathname.match(/^\/threads\/([^/]+)$/)
   if (threadMatch?.[1]) return { kind: 'thread', sessionId: decodeURIComponent(threadMatch[1]) }
   return { kind: 'main' }
@@ -61,27 +57,12 @@ function parseRoute(pathname: string): AppRoute {
 function getRoutePath(route: AppRoute): string {
   switch (route.kind) {
     case 'main': return '/'
-    case 'threads': return '/threads'
     case 'thread': return `/threads/${encodeURIComponent(route.sessionId)}`
   }
 }
 
 function shortId(sessionId: string): string {
   return sessionId.slice(0, 8)
-}
-
-function formatRelativeTime(timestamp: string): string {
-  const value = new Date(timestamp).getTime()
-  if (Number.isNaN(value)) return 'Recently'
-  const diffMs = Date.now() - value
-  const diffMinutes = Math.round(diffMs / 60000)
-  if (diffMinutes <= 0) return 'Just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
-  const diffHours = Math.round(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.round(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}d ago`
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(timestamp))
 }
 
 function formatMessageTime(timestamp: string | Date | undefined): string {
@@ -386,9 +367,7 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
 function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.pathname))
   const [sessions, setSessions] = useState<SessionState[]>([])
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   useSystemTheme()
 
   const navigateTo = useCallback((nextRoute: AppRoute, options?: { replace?: boolean }) => {
@@ -406,20 +385,9 @@ function App() {
 
   // Load thread list
   useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setIsLoadingSessions(true)
-      try {
-        const listed = await listSessions()
-        if (!cancelled) setSessions(sortSessions(listed))
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load threads')
-      } finally {
-        if (!cancelled) setIsLoadingSessions(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
+    void listSessions()
+      .then((listed) => setSessions(sortSessions(listed)))
+      .catch(() => {}) // Silently handle - sidebar shows empty state
   }, [])
 
   // Init main session on first load
@@ -428,29 +396,28 @@ function App() {
   }, [])
 
   const handleNavigateMain = useCallback(() => navigateTo({ kind: 'main' }), [navigateTo])
-  const handleNavigateThreads = useCallback(() => navigateTo({ kind: 'threads' }), [navigateTo])
 
   const handleCreateThread = async () => {
     setIsCreating(true)
-    setError(null)
     try {
       const created = await createSession()
       setSessions((current) => sortSessions([...current, created]))
       navigateTo({ kind: 'thread', sessionId: created.sessionId })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create thread')
+      console.error('Failed to create thread:', e)
     } finally {
       setIsCreating(false)
     }
   }
 
-  const handleOpenThread = useCallback((session: SessionState) => {
-    navigateTo({ kind: 'thread', sessionId: session.sessionId })
+  const handleOpenThread = useCallback((sessionId: string) => {
+    navigateTo({ kind: 'thread', sessionId })
   }, [navigateTo])
 
   const sessionId = route.kind === 'main' ? MAIN_SESSION_ID : route.kind === 'thread' ? route.sessionId : null
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
-  const activeTitle = route.kind === 'main' ? 'Main' : route.kind === 'threads' ? 'Threads' : `Thread ${shortId(route.sessionId)}`
+  const activeThreadId = route.kind === 'thread' ? route.sessionId : null
+  const activeTitle = route.kind === 'main' ? 'Main' : `Thread ${shortId(route.sessionId)}`
 
   // Agent connection — lives here so MCP state is available to sidebar
   const [mcpState, setMcpState] = useState<McpState>({ servers: {}, tools: [] })
@@ -473,10 +440,12 @@ function App() {
     <SidebarProvider className='h-svh max-h-svh overflow-hidden'>
       <AppSidebar
         activeSection={activeSection}
+        activeThreadId={activeThreadId}
         onNavigateMain={handleNavigateMain}
-        onNavigateThreads={handleNavigateThreads}
+        onOpenThread={handleOpenThread}
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
+        sessions={sessions}
         mcpServers={mcpServers}
         mcpToolCount={mcpState.tools.length}
       />
@@ -489,98 +458,9 @@ function App() {
           </div>
         </header>
 
-        {sessionId ? (
-          <ChatView sessionId={sessionId} agent={agent} mcpServerNames={mcpServerNames} />
-        ) : (
-          <ThreadList
-            sessions={sessions}
-            isLoading={isLoadingSessions}
-            isCreating={isCreating}
-            error={error}
-            onOpen={handleOpenThread}
-            onCreate={handleCreateThread}
-          />
-        )}
+        <ChatView sessionId={sessionId!} agent={agent} mcpServerNames={mcpServerNames} />
       </SidebarInset>
     </SidebarProvider>
-  )
-}
-
-// --- Thread list view ---
-
-function ThreadList({
-  sessions,
-  isLoading,
-  isCreating,
-  error,
-  onOpen,
-  onCreate,
-}: {
-  sessions: SessionState[]
-  isLoading: boolean
-  isCreating: boolean
-  error: string | null
-  onOpen: (session: SessionState) => void
-  onCreate: () => void
-}) {
-  return (
-    <div className='flex min-h-0 flex-1 flex-col'>
-      <div className='min-h-0 flex-1 overflow-y-auto'>
-        <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-6 sm:px-6'>
-          {error ? (
-            <div className='border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'>{error}</div>
-          ) : null}
-
-          {isLoading && sessions.length === 0 ? (
-            <div className='border border-dashed bg-card/70 px-4 py-6 text-sm text-muted-foreground'>Loading threads…</div>
-          ) : sessions.length === 0 ? (
-            <div className='flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-dashed bg-card/70 px-6 py-12 text-center'>
-              <h3 className='text-2xl font-semibold tracking-tight'>No threads yet</h3>
-              <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
-                Main lives at the root route. Create extra threads here when you want to branch off.
-              </p>
-              <Button onClick={onCreate} disabled={isCreating}>
-                {isCreating ? <SpinnerGap className='animate-spin' data-icon='inline-start' /> : <Plus data-icon='inline-start' />}
-                {isCreating ? 'Creating…' : 'New thread'}
-              </Button>
-            </div>
-          ) : (
-            sessions.map((item) => (
-              <button
-                key={item.sessionId}
-                type='button'
-                onClick={() => onOpen(item)}
-                className='flex w-full flex-col gap-4 border bg-background px-4 py-4 text-left transition-colors hover:bg-card sm:flex-row sm:items-center sm:justify-between'
-              >
-                <div className='min-w-0 flex-1'>
-                  <p className='line-clamp-2 text-base font-medium leading-6'>
-                    {item.title?.trim() || `Thread ${shortId(item.sessionId)}`}
-                  </p>
-                  <div className='mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground'>
-                    <span>{shortId(item.sessionId)}</span>
-                    <span>•</span>
-                    <span className='inline-flex items-center gap-1.5'>
-                      <ClockCounterClockwise />
-                      {formatRelativeTime(item.updatedAt)}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className='shrink-0 border-t bg-background/95 px-4 py-4 backdrop-blur sm:px-6'>
-        <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-          <p className='text-sm text-muted-foreground'>Open a thread here, or return to Main from the sidebar.</p>
-          <Button onClick={onCreate} disabled={isCreating}>
-            {isCreating ? <SpinnerGap className='animate-spin' data-icon='inline-start' /> : <Plus data-icon='inline-start' />}
-            {isCreating ? 'Creating…' : 'New thread'}
-          </Button>
-        </div>
-      </div>
-    </div>
   )
 }
 
