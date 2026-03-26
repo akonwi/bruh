@@ -12,6 +12,8 @@
     "@ai-sdk/anthropic": "^3.0.64",
     "@ai-sdk/openai": "^3.0.48",
     "@cloudflare/ai-chat": "^0.2.5",
+    "@cloudflare/codemode": "^0.3.2",
+    "@cloudflare/puppeteer": "^1.0.6",
     "@cloudflare/sandbox": "^0.7.20",
     "agents": "^0.8.2",
     "ai": "^6.0.138",

@@ -13,6 +13,14 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": true
   },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

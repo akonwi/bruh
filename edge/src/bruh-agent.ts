@@ -1,6 +1,9 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { AIChatAgent, type OnChatMessageOptions } from '@cloudflare/ai-chat'
+import { DynamicWorkerExecutor } from '@cloudflare/codemode'
+import { createCodeTool } from '@cloudflare/codemode/ai'
+import puppeteer from '@cloudflare/puppeteer'
 import { getSandbox, type Sandbox } from '@cloudflare/sandbox'
 import { getAgentByName } from 'agents'
 import type { UIMessage } from 'ai'
@@ -88,6 +91,8 @@ interface BruhEnv {
   HOST?: string
   APP_ORIGIN?: string
   GITHUB_MCP_TOKEN?: string
+  BROWSER?: Fetcher
+  LOADER?: WorkerLoader
   [key: string]: unknown
 }
 
@@ -152,6 +157,18 @@ You have access to an isolated sandbox container with a full Linux environment. 
 
 ## MCP
 You can connect to external MCP servers for additional tools. Use mcp_servers to check what's connected.
+
+## Web browsing
+You can browse and extract content from websites using browse_web.
+- Use browse_web when you need up-to-date web info.
+- Prefer multi-step action chains in a single browse_web call for complex browsing.
+- Cite page titles and URLs in your response.
+- If extraction is noisy, use a focused CSS selector.
+
+## Codemode
+For complex tasks that require many tool calls, prefer codemode.
+Codemode lets you write short JavaScript that orchestrates tools (loops, branching, retries) in one step.
+Use codemode for deep research, multi-page workflows, and composing outputs across many tools.
 
 ## Style
 - Be direct and concise.
@@ -701,6 +718,305 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         },
       }),
 
+      // --- Web browsing tools ---
+
+      browse_web: createTool<{
+        url?: string
+        selector?: string
+        maxChars?: number
+        actions?: Array<{
+          type: 'goto' | 'click' | 'type' | 'wait_for' | 'extract' | 'links'
+          url?: string
+          selector?: string
+          text?: string
+          submit?: boolean
+          ms?: number
+          maxChars?: number
+          limit?: number
+        }>
+      }>({
+        description:
+          'Browse websites in a single browser session. Supports action chains (goto/click/type/wait_for/extract/links) for multi-step navigation and extraction.',
+        parameters: jsonSchema<{
+          url?: string
+          selector?: string
+          maxChars?: number
+          actions?: Array<{
+            type: 'goto' | 'click' | 'type' | 'wait_for' | 'extract' | 'links'
+            url?: string
+            selector?: string
+            text?: string
+            submit?: boolean
+            ms?: number
+            maxChars?: number
+            limit?: number
+          }>
+        }>({
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description:
+                'Optional single-page mode URL. If actions are omitted, this URL is loaded and extracted.',
+            },
+            selector: {
+              type: 'string',
+              description:
+                'Optional extraction selector for single-page mode or extract actions.',
+            },
+            maxChars: {
+              type: 'number',
+              description: 'Default extraction max chars (500-20000, default 8000).',
+            },
+            actions: {
+              type: 'array',
+              description:
+                'Optional multi-step browsing actions to run in order within one browser session.',
+              items: {
+                type: 'object',
+                properties: {
+                  type: {
+                    type: 'string',
+                    enum: ['goto', 'click', 'type', 'wait_for', 'extract', 'links'],
+                  },
+                  url: { type: 'string' },
+                  selector: { type: 'string' },
+                  text: { type: 'string' },
+                  submit: { type: 'boolean' },
+                  ms: { type: 'number' },
+                  maxChars: { type: 'number' },
+                  limit: { type: 'number' },
+                },
+                required: ['type'],
+              },
+            },
+          },
+        }),
+        execute: async ({ url, selector, maxChars, actions }) => {
+          if (!env.BROWSER) {
+            throw new ToolError('Browser binding is not configured')
+          }
+
+          const defaultLimit = Math.min(Math.max(maxChars ?? 8000, 500), 20_000)
+
+          const normalizeUrl = (value: string) => {
+            let parsed: URL
+            try {
+              parsed = new URL(value)
+            } catch {
+              throw new ToolError(`invalid url: ${value}`)
+            }
+            if (!['http:', 'https:'].includes(parsed.protocol)) {
+              throw new ToolError('url must use http or https')
+            }
+            return parsed.toString()
+          }
+
+          const plannedActions =
+            actions && actions.length > 0
+              ? actions
+              : [
+                  {
+                    type: 'goto' as const,
+                    url,
+                  },
+                  {
+                    type: 'extract' as const,
+                    selector,
+                    maxChars: defaultLimit,
+                  },
+                ]
+
+          const browser = await puppeteer.launch(env.BROWSER)
+          try {
+            const page = await browser.newPage()
+            const steps: Array<Record<string, unknown>> = []
+
+            for (const action of plannedActions) {
+              switch (action.type) {
+                case 'goto': {
+                  const target = action.url?.trim()
+                  if (!target) throw new ToolError('goto requires url')
+                  const nextUrl = normalizeUrl(target)
+                  await page.goto(nextUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30_000,
+                  })
+                  steps.push({ type: 'goto', url: page.url() })
+                  break
+                }
+
+                case 'click': {
+                  const targetSelector = action.selector?.trim()
+                  if (!targetSelector)
+                    throw new ToolError('click requires selector')
+                  await page.waitForSelector(targetSelector, { timeout: 10_000 })
+                  await page.click(targetSelector)
+                  await page
+                    .waitForNavigation({
+                      waitUntil: 'domcontentloaded',
+                      timeout: 10_000,
+                    })
+                    .catch(() => undefined)
+                  steps.push({
+                    type: 'click',
+                    selector: targetSelector,
+                    url: page.url(),
+                  })
+                  break
+                }
+
+                case 'type': {
+                  const targetSelector = action.selector?.trim()
+                  if (!targetSelector) throw new ToolError('type requires selector')
+                  const text = action.text ?? ''
+                  await page.waitForSelector(targetSelector, { timeout: 10_000 })
+                  await page.click(targetSelector, { clickCount: 3 })
+                  await page.type(targetSelector, text)
+                  if (action.submit) {
+                    await page.keyboard.press('Enter')
+                    await page
+                      .waitForNavigation({
+                        waitUntil: 'domcontentloaded',
+                        timeout: 10_000,
+                      })
+                      .catch(() => undefined)
+                  }
+                  steps.push({
+                    type: 'type',
+                    selector: targetSelector,
+                    textLength: text.length,
+                    submitted: Boolean(action.submit),
+                    url: page.url(),
+                  })
+                  break
+                }
+
+                case 'wait_for': {
+                  if (action.selector?.trim()) {
+                    await page.waitForSelector(action.selector.trim(), {
+                      timeout: 10_000,
+                    })
+                    steps.push({
+                      type: 'wait_for',
+                      selector: action.selector.trim(),
+                    })
+                  } else {
+                    const ms = Math.min(Math.max(action.ms ?? 1000, 100), 30_000)
+                    await new Promise((resolve) => setTimeout(resolve, ms))
+                    steps.push({ type: 'wait_for', ms })
+                  }
+                  break
+                }
+
+                case 'links': {
+                  const targetSelector = action.selector?.trim()
+                  const maxLinks = Math.min(Math.max(action.limit ?? 10, 1), 100)
+                  const links = await page.evaluate(
+                    ({ scopeSelector, limit }) => {
+                      const root = scopeSelector
+                        ? document.querySelector(scopeSelector)
+                        : document
+                      if (!root) return [] as Array<{ text: string; url: string }>
+
+                      const seen = new Set<string>()
+                      const collected: Array<{ text: string; url: string }> = []
+                      const anchors = Array.from(root.querySelectorAll('a[href]'))
+
+                      for (const anchor of anchors) {
+                        const href = anchor.getAttribute('href') || ''
+                        let absolute = ''
+                        try {
+                          absolute = new URL(href, location.href).toString()
+                        } catch {
+                          continue
+                        }
+                        if (!absolute || seen.has(absolute)) continue
+                        seen.add(absolute)
+                        collected.push({
+                          text: (anchor.textContent || '').replace(/\s+/g, ' ').trim(),
+                          url: absolute,
+                        })
+                        if (collected.length >= limit) break
+                      }
+
+                      return collected
+                    },
+                    { scopeSelector: targetSelector, limit: maxLinks },
+                  )
+
+                  steps.push({
+                    type: 'links',
+                    selector: targetSelector || null,
+                    count: links.length,
+                    links,
+                    url: page.url(),
+                  })
+                  break
+                }
+
+                case 'extract': {
+                  const targetSelector = action.selector?.trim() || selector?.trim()
+                  const limit = Math.min(
+                    Math.max(action.maxChars ?? defaultLimit, 500),
+                    20_000,
+                  )
+
+                  const extracted = await page.evaluate(
+                    ({ scopeSelector }) => {
+                      const target = scopeSelector
+                        ? document.querySelector(scopeSelector)
+                        : document.body
+                      const text = (target?.textContent || '')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                      return {
+                        title: document.title || '',
+                        url: location.href,
+                        text,
+                      }
+                    },
+                    { scopeSelector: targetSelector },
+                  )
+
+                  const clipped =
+                    extracted.text.length > limit
+                      ? `${extracted.text.slice(0, limit)}…`
+                      : extracted.text
+
+                  steps.push({
+                    type: 'extract',
+                    selector: targetSelector || null,
+                    title: extracted.title || '(untitled)',
+                    url: extracted.url,
+                    textLength: extracted.text.length,
+                    text: clipped,
+                  })
+                  break
+                }
+
+                default: {
+                  throw new ToolError(`unsupported action type: ${String(action.type)}`)
+                }
+              }
+            }
+
+            return JSON.stringify(
+              {
+                ok: true,
+                finalUrl: page.url(),
+                stepCount: steps.length,
+                steps,
+              },
+              null,
+              2,
+            )
+          } finally {
+            await browser.close().catch(() => undefined)
+          }
+        },
+      }),
+
       // --- MCP tools ---
 
       mcp_servers: createTool<Record<string, never>>({
@@ -1022,6 +1338,27 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     }
   }
 
+  private getRuntimeTools(includeMcp = true): ToolSet {
+    const baseTools = {
+      ...this.getTools(),
+      ...(includeMcp ? this.mcp.getAITools() : {}),
+    }
+
+    if (!this.env.LOADER) {
+      return baseTools
+    }
+
+    const codemode = createCodeTool({
+      tools: baseTools,
+      executor: new DynamicWorkerExecutor({ loader: this.env.LOADER }),
+    })
+
+    return {
+      ...baseTools,
+      codemode,
+    }
+  }
+
   // --- AIChatAgent: the agent loop ---
 
   async onChatMessage(
@@ -1029,9 +1366,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     options?: OnChatMessageOptions,
   ): Promise<Response | undefined> {
     const model = this.getModel()
-    // Merge custom tools with MCP tools from connected servers
-    const mcpTools = this.mcp.getAITools()
-    const tools = { ...this.getTools(), ...mcpTools }
+    const tools = this.getRuntimeTools(true)
 
     // Set title from first user message
     const lastUserMessage = [...this.messages]
@@ -1247,8 +1582,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     this.messages.push(userMessage)
 
     const model = this.getModel()
-    const mcpTools = this.mcp.getAITools()
-    const tools = { ...this.getTools(), ...mcpTools }
+    const tools = this.getRuntimeTools(true)
     const modelMessages = await convertToModelMessages(
       sanitizeMessages(this.messages),
     )
