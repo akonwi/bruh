@@ -38,6 +38,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useSystemTheme } from '@/hooks/use-theme'
 import {
   createSession,
+  deleteSession,
   followUpSession,
   getMainSession,
   listSessions,
@@ -660,6 +661,28 @@ function App() {
     [],
   )
 
+  const handleDeleteThread = useCallback(
+    async (sessionId: string) => {
+      await deleteSession(sessionId)
+
+      const listed = await listSessions().catch(() => null)
+      if (listed) {
+        setSessions(sortSessions(listed))
+      } else {
+        setSessions((current) =>
+          sortSessions(
+            current.filter((session) => session.sessionId !== sessionId),
+          ),
+        )
+      }
+
+      if (route.kind === 'thread' && route.sessionId === sessionId) {
+        navigateTo({ kind: 'main' }, { replace: true })
+      }
+    },
+    [navigateTo, route],
+  )
+
   const sessionId = route.kind === 'main' ? MAIN_SESSION_ID : route.sessionId
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const activeThreadId = route.kind === 'thread' ? route.sessionId : null
@@ -700,6 +723,7 @@ function App() {
         onNavigateMain={handleNavigateMain}
         onOpenThread={handleOpenThread}
         onRenameThread={handleRenameThread}
+        onDeleteThread={handleDeleteThread}
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
         sessions={sessions}

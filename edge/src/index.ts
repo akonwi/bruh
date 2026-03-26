@@ -21,7 +21,7 @@ app.use(
   '*',
   cors({
     origin: '*',
-    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Last-Event-ID', 'X-Bruh-Internal-Secret'],
   }),
 )
@@ -130,6 +130,51 @@ app.post('/sessions/:sessionId/refresh-context', async (c) => {
     }),
   )
 })
+
+async function unregisterThread(env: Env, sessionId: string): Promise<Response> {
+  const registryStub = await getAgentByName(env.BRUH_AGENT, REGISTRY_AGENT_NAME)
+  return registryStub.fetch(
+    new Request('https://agent/unregister-thread', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    }),
+  )
+}
+
+async function handleDeleteSession(c: {
+  req: { param: (key: string) => string }
+  env: Env
+  executionCtx: ExecutionContext
+  json: (body: unknown, status?: number) => Response
+}): Promise<Response> {
+  const sessionId = c.req.param('sessionId')
+  if (sessionId === MAIN_SESSION_ID) {
+    return c.json({ error: 'main session cannot be deleted' }, 400)
+  }
+
+  const unregisterResponse = await unregisterThread(c.env, sessionId)
+  if (!unregisterResponse.ok) return unregisterResponse
+
+  // Best-effort cleanup of thread DO state without blocking response.
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const sessionStub = await getAgentByName(c.env.BRUH_AGENT, sessionId)
+        await sessionStub.fetch(
+          new Request('https://agent/delete-thread', { method: 'POST' }),
+        )
+      } catch (error) {
+        console.error('[DeleteSession] Background thread cleanup failed:', error)
+      }
+    })(),
+  )
+
+  return c.json({ ok: true, sessionId })
+}
+
+app.delete('/sessions/:sessionId', handleDeleteSession)
+app.post('/sessions/:sessionId/delete', handleDeleteSession)
 
 // --- SSE streaming (legacy event system for current web app) ---
 

@@ -1761,6 +1761,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         return this.handleHttpAbort()
       case 'POST /register-thread':
         return this.handleRegisterThread(request)
+      case 'POST /unregister-thread':
+        return this.handleUnregisterThread(request)
+      case 'POST /delete-thread':
+        return this.handleDeleteThread()
       case 'POST /rename':
         return this.handleRenameThread(request)
       case 'POST /refresh-context':
@@ -1940,6 +1944,47 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       this
         .sql`INSERT INTO thread_registry (session_id, created_at) VALUES (${sessionId}, ${createdAt})`
     }
+
+    return Response.json({ ok: true, sessionId })
+  }
+
+  private async handleUnregisterThread(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      sessionId?: string
+    }
+    const sessionId = body.sessionId?.trim()
+    if (!sessionId) {
+      return Response.json({ error: 'sessionId is required' }, { status: 400 })
+    }
+
+    this.sql`DELETE FROM thread_registry WHERE session_id = ${sessionId}`
+    return Response.json({ ok: true, sessionId })
+  }
+
+  private async handleDeleteThread(): Promise<Response> {
+    const sessionId = this.state.sessionId || this.name
+    if (!sessionId || sessionId === 'main') {
+      return Response.json(
+        { error: 'main thread cannot be deleted' },
+        { status: 400 },
+      )
+    }
+
+    this.messages = []
+    this.ctx.waitUntil(
+      this.saveMessages(this.messages).catch((error) => {
+        console.error('[BruhAgent] Failed to persist deleted thread messages:', error)
+      }),
+    )
+
+    const now = new Date().toISOString()
+    this.setState({
+      ...this.state,
+      title: undefined,
+      contextSummary: undefined,
+      contextRefreshedAt: undefined,
+      updatedAt: now,
+    })
 
     return Response.json({ ok: true, sessionId })
   }

@@ -65,6 +65,14 @@ export async function refreshSessionContext(sessionId: string): Promise<void> {
     throw new Error(`Failed to refresh context: ${response.status}`)
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}/delete`), {
+    method: 'POST',
+  })
+  if (!response.ok)
+    throw new Error(`Failed to delete session: ${response.status}`)
+}
+
 export async function steerSession(
   sessionId: string,
   text: string,

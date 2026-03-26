@@ -57,6 +57,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   onNavigateMain: () => void
   onOpenThread: (sessionId: string) => void
   onRenameThread: (sessionId: string, title: string) => Promise<void>
+  onDeleteThread: (sessionId: string) => Promise<void>
   onCreateThread: () => void
   isCreating: boolean
   sessions: SessionState[]
@@ -154,6 +155,7 @@ export function AppSidebar({
   onNavigateMain,
   onOpenThread,
   onRenameThread,
+  onDeleteThread,
   onCreateThread,
   isCreating,
   sessions,
@@ -168,6 +170,7 @@ export function AppSidebar({
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [isRenaming, setIsRenaming] = useState(false)
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -227,6 +230,27 @@ export function AppSidebar({
     }
   }
 
+  const handleDeleteThread = async (session: SessionState) => {
+    const confirmed = window.confirm(
+      `Delete thread "${session.title?.trim() || shortId(session.sessionId)}"? This cannot be undone.`,
+    )
+    if (!confirmed) return
+
+    setDeletingThreadId(session.sessionId)
+    try {
+      await onDeleteThread(session.sessionId)
+      if (editingThreadId === session.sessionId) {
+        cancelRename()
+      }
+    } catch (error) {
+      console.error('Failed to delete thread:', error)
+    } finally {
+      setDeletingThreadId((current) =>
+        current === session.sessionId ? null : current,
+      )
+    }
+  }
+
   return (
     <Sidebar collapsible='icon' {...props}>
       <SidebarHeader>
@@ -252,6 +276,7 @@ export function AppSidebar({
               <SidebarMenuSub>
                 {sortedSessions.map((session) => {
                   const isEditing = editingThreadId === session.sessionId
+                  const isDeleting = deletingThreadId === session.sessionId
 
                   return (
                     <SidebarMenuSubItem key={session.sessionId}>
@@ -260,7 +285,8 @@ export function AppSidebar({
                           <SidebarMenuSubButton
                             isActive={activeThreadId === session.sessionId}
                             onClick={() => {
-                              if (!isEditing) onOpenThread(session.sessionId)
+                              if (!isEditing && !isDeleting)
+                                onOpenThread(session.sessionId)
                             }}
                           >
                             {isEditing ? (
@@ -276,7 +302,7 @@ export function AppSidebar({
                                   }
                                 }}
                                 onBlur={() => cancelRename()}
-                                disabled={isRenaming}
+                                disabled={isRenaming || isDeleting}
                                 className='h-6 text-xs'
                                 autoFocus
                               />
@@ -296,9 +322,18 @@ export function AppSidebar({
                         <ContextMenuContent>
                           <ContextMenuItem
                             onClick={() => startRename(session)}
-                            disabled={isRenaming || isEditing}
+                            disabled={isRenaming || isEditing || isDeleting}
                           >
                             Rename
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            variant='destructive'
+                            onClick={() => {
+                              void handleDeleteThread(session)
+                            }}
+                            disabled={isRenaming || isDeleting}
+                          >
+                            Delete
                           </ContextMenuItem>
                         </ContextMenuContent>
                       </ContextMenu>
