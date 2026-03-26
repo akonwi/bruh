@@ -13,6 +13,7 @@ import {
   isToolUIPart,
   jsonSchema,
   type StreamTextOnFinishCallback,
+  pruneMessages,
   stepCountIs,
   streamText,
   type ToolSet,
@@ -1476,9 +1477,16 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       }
     }
 
-    const modelMessages = await convertToModelMessages(
+    const rawModelMessages = await convertToModelMessages(
       sanitizeMessages(this.messages),
     )
+    const prunedModelMessages = pruneMessages({
+      messages: rawModelMessages,
+      reasoning: 'all',
+      toolCalls: 'before-last-8-messages',
+      emptyMessages: 'remove',
+    })
+    const modelMessages = prunedModelMessages.slice(-24)
 
     // Wrap onFinish to auto-write session summary
     const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (
@@ -1690,9 +1698,16 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     const model = this.getModel()
     const tools = this.getRuntimeTools(true)
-    const modelMessages = await convertToModelMessages(
+    const rawModelMessages = await convertToModelMessages(
       sanitizeMessages(this.messages),
     )
+    const prunedModelMessages = pruneMessages({
+      messages: rawModelMessages,
+      reasoning: 'all',
+      toolCalls: 'before-last-8-messages',
+      emptyMessages: 'remove',
+    })
+    const modelMessages = prunedModelMessages.slice(-24)
 
     const result = streamText({
       model,

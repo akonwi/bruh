@@ -144,7 +144,7 @@ function ChatView({
   const clientTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
-  const { messages, sendMessage, stop, error, status } = useAgentChat({
+  const { messages, sendMessage, stop, clearHistory, error, status } = useAgentChat({
     agent,
     body: () => ({
       clientTimezone,
@@ -194,6 +194,14 @@ function ChatView({
     sendMessage({ role: 'user', parts: [{ type: 'text', text }] })
     setInput('')
   }, [input, isLoading, queueMode, sessionId, sendMessage])
+
+  const handleClearHistory = useCallback(() => {
+    const ok = window.confirm(
+      'Clear this chat history? This cannot be undone for this thread.',
+    )
+    if (!ok) return
+    clearHistory()
+  }, [clearHistory])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -309,6 +317,13 @@ function ChatView({
                 ) : null}
               </div>
               <div className='flex items-center gap-2'>
+                <Button
+                  variant='outline'
+                  onClick={handleClearHistory}
+                  disabled={isLoading || messages.length === 0}
+                >
+                  Clear history
+                </Button>
                 {isLoading ? (
                   <Button variant='outline' onClick={() => stop()}>
                     <StopCircleIcon data-icon='inline-start' />
