@@ -100,6 +100,10 @@ interface BruhState {
   latestSeq: number
 }
 
+type SandboxListFileEntry = NonNullable<
+  Awaited<ReturnType<Sandbox['listFiles']>>['files']
+>[number]
+
 interface McpServerConfig {
   name: string
   url: string
@@ -966,7 +970,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           if (!result.files?.length) return 'Empty directory.'
           return result.files
             .map(
-              (f: any) =>
+              (f: SandboxListFileEntry) =>
                 `${f.type === 'directory' ? 'd' : '-'} ${f.name}${f.size != null ? ` (${f.size} bytes)` : ''}`,
             )
             .join('\n')
