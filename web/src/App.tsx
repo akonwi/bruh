@@ -41,6 +41,7 @@ import {
   followUpSession,
   getMainSession,
   listSessions,
+  renameSession,
   type SessionState,
   steerSession,
 } from '@/lib/api'
@@ -567,11 +568,31 @@ function App() {
     [navigateTo],
   )
 
+  const handleRenameThread = useCallback(
+    async (sessionId: string, title: string) => {
+      const updated = await renameSession(sessionId, title)
+      setSessions((current) =>
+        sortSessions(
+          current.map((session) =>
+            session.sessionId === sessionId ? updated : session,
+          ),
+        ),
+      )
+    },
+    [],
+  )
+
   const sessionId = route.kind === 'main' ? MAIN_SESSION_ID : route.sessionId
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const activeThreadId = route.kind === 'thread' ? route.sessionId : null
+  const activeThread =
+    route.kind === 'thread'
+      ? sessions.find((session) => session.sessionId === route.sessionId)
+      : null
   const activeTitle =
-    route.kind === 'main' ? 'Main' : `Thread ${shortId(route.sessionId)}`
+    route.kind === 'main'
+      ? 'Main'
+      : activeThread?.title?.trim() || `Thread ${shortId(route.sessionId)}`
 
   // Agent connection — lives here so MCP state is available to sidebar
   const [mcpState, setMcpState] = useState<McpState>({ servers: {}, tools: [] })
@@ -600,6 +621,7 @@ function App() {
         activeThreadId={activeThreadId}
         onNavigateMain={handleNavigateMain}
         onOpenThread={handleOpenThread}
+        onRenameThread={handleRenameThread}
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
         sessions={sessions}

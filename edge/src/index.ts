@@ -21,7 +21,7 @@ app.use(
   '*',
   cors({
     origin: '*',
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Last-Event-ID', 'X-Bruh-Internal-Secret'],
   }),
 )
@@ -97,6 +97,28 @@ app.get('/sessions/:sessionId', async (c) => {
   const session = await initSession(c.env, sessionId)
   await registerThread(c.env, session)
   return c.json(session)
+})
+
+app.patch('/sessions/:sessionId', async (c) => {
+  const sessionId = c.req.param('sessionId')
+  if (sessionId === MAIN_SESSION_ID) {
+    return c.json({ error: 'main session cannot be renamed' }, 400)
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as { title?: string }
+  const title = body.title?.trim()
+  if (!title) {
+    return c.json({ error: 'title is required' }, 400)
+  }
+
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId)
+  return stub.fetch(
+    new Request('https://agent/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
+  )
 })
 
 // --- SSE streaming (legacy event system for current web app) ---

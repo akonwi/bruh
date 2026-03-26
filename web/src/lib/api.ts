@@ -43,6 +43,20 @@ export async function getSession(sessionId: string): Promise<SessionState> {
   return response.json()
 }
 
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<SessionState> {
+  const response = await fetch(apiUrl(`/sessions/${sessionId}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok)
+    throw new Error(`Failed to rename session: ${response.status}`)
+  return response.json()
+}
+
 export async function steerSession(
   sessionId: string,
   text: string,

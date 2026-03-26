@@ -7,6 +7,15 @@ import {
   WarningCircleIcon,
 } from '@phosphor-icons/react'
 
+import { useEffect, useRef, useState } from 'react'
+
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
@@ -47,6 +56,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   activeThreadId: string | null
   onNavigateMain: () => void
   onOpenThread: (sessionId: string) => void
+  onRenameThread: (sessionId: string, title: string) => Promise<void>
   onCreateThread: () => void
   isCreating: boolean
   sessions: SessionState[]
@@ -140,10 +150,10 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 }
 
 export function AppSidebar({
-  activeSection,
   activeThreadId,
   onNavigateMain,
   onOpenThread,
+  onRenameThread,
   onCreateThread,
   isCreating,
   sessions,
@@ -155,6 +165,67 @@ export function AppSidebar({
   const collapsed = state === 'collapsed'
   const sortedSessions = sortSessions(sessions)
   const hasThreads = sessions.length > 0
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [isRenaming, setIsRenaming] = useState(false)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!editingThreadId) return
+    const raf = requestAnimationFrame(() => {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [editingThreadId])
+
+  useEffect(() => {
+    if (!editingThreadId) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const input = renameInputRef.current
+      if (!input) return
+      if (event.target instanceof Node && !input.contains(event.target)) {
+        cancelRename()
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [editingThreadId])
+
+  const startRename = (session: SessionState) => {
+    setEditingThreadId(session.sessionId)
+    setEditingTitle(session.title?.trim() || '')
+  }
+
+  const cancelRename = () => {
+    setEditingThreadId(null)
+    setEditingTitle('')
+    setIsRenaming(false)
+  }
+
+  const saveRename = async (session: SessionState) => {
+    if (isRenaming) return
+    const nextTitle = editingTitle.trim()
+    const prevTitle = session.title?.trim() || ''
+    if (!nextTitle || nextTitle === prevTitle) {
+      cancelRename()
+      return
+    }
+
+    setIsRenaming(true)
+    try {
+      await onRenameThread(session.sessionId, nextTitle)
+      cancelRename()
+    } catch (error) {
+      console.error('Failed to rename thread:', error)
+      setIsRenaming(false)
+    }
+  }
 
   return (
     <Sidebar collapsible='icon' {...props}>
@@ -179,22 +250,61 @@ export function AppSidebar({
           <SidebarMenu>
             {hasThreads && (
               <SidebarMenuSub>
-                {sortedSessions.map((session) => (
-                  <SidebarMenuSubItem key={session.sessionId}>
-                    <SidebarMenuSubButton
-                      isActive={activeThreadId === session.sessionId}
-                      onClick={() => onOpenThread(session.sessionId)}
-                    >
-                      <span className='truncate'>
-                        {session.title?.trim() || shortId(session.sessionId)}
-                      </span>
-                      <span className='ml-auto flex shrink-0 items-center gap-1 text-[10px] text-sidebar-foreground/50'>
-                        <ClockCounterClockwiseIcon className='size-2.5' />
-                        {formatRelativeTime(session.updatedAt)}
-                      </span>
-                    </SidebarMenuSubButton>
-                  </SidebarMenuSubItem>
-                ))}
+                {sortedSessions.map((session) => {
+                  const isEditing = editingThreadId === session.sessionId
+
+                  return (
+                    <SidebarMenuSubItem key={session.sessionId}>
+                      <ContextMenu>
+                        <ContextMenuTrigger>
+                          <SidebarMenuSubButton
+                            isActive={activeThreadId === session.sessionId}
+                            onClick={() => {
+                              if (!isEditing) onOpenThread(session.sessionId)
+                            }}
+                          >
+                            {isEditing ? (
+                              <Input
+                                ref={renameInputRef}
+                                value={editingTitle}
+                                onChange={(e) => setEditingTitle(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    void saveRename(session)
+                                  }
+                                }}
+                                onBlur={() => cancelRename()}
+                                disabled={isRenaming}
+                                className='h-6 text-xs'
+                                autoFocus
+                              />
+                            ) : (
+                              <>
+                                <span className='truncate'>
+                                  {session.title?.trim() || shortId(session.sessionId)}
+                                </span>
+                                <span className='ml-auto flex shrink-0 items-center gap-1 text-[10px] text-sidebar-foreground/50'>
+                                  <ClockCounterClockwiseIcon className='size-2.5' />
+                                  {formatRelativeTime(session.updatedAt)}
+                                </span>
+                              </>
+                            )}
+                          </SidebarMenuSubButton>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            onClick={() => startRename(session)}
+                            disabled={isRenaming || isEditing}
+                          >
+                            Rename
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    </SidebarMenuSubItem>
+                  )
+                })}
               </SidebarMenuSub>
             )}
 

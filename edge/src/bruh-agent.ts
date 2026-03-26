@@ -1207,6 +1207,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         return this.handleHttpAbort()
       case 'POST /register-thread':
         return this.handleRegisterThread(request)
+      case 'POST /rename':
+        return this.handleRenameThread(request)
       case 'GET /threads':
         return this.handleListThreads()
       // Legacy event system (remove once web app fully migrated)
@@ -1373,6 +1375,31 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     }
 
     return Response.json({ ok: true, sessionId })
+  }
+
+  private async handleRenameThread(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { title?: string }
+    const title = body.title?.trim()
+
+    if (!title) {
+      return Response.json({ error: 'title is required' }, { status: 400 })
+    }
+
+    const sessionId = this.state.sessionId || this.name
+    if (!sessionId || sessionId === 'main') {
+      return Response.json(
+        { error: 'main thread cannot be renamed' },
+        { status: 400 },
+      )
+    }
+
+    this.setState({
+      ...this.state,
+      title,
+      updatedAt: new Date().toISOString(),
+    })
+
+    return Response.json(this.toMetadata())
   }
 
   private handleListThreads(): Response {
