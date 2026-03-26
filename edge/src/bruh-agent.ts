@@ -35,12 +35,20 @@ function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
 }
 
 // --- Helper: typed tool creation (works around AI SDK v6 overload issues) ---
+// Tool execute functions should throw on errors — the AI SDK will set state to 'output-error'
 function createTool<T>(config: {
   description: string;
   parameters: ReturnType<typeof jsonSchema>;
   execute: (args: T) => Promise<string>;
 }) {
   return tool({ ...config, inputSchema: config.parameters } as any);
+}
+
+class ToolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolError';
+  }
 }
 
 // --- Env & State ---
@@ -354,8 +362,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
           const content = await object.text();
           const occurrences = content.split(oldText).length - 1;
-          if (occurrences === 0) return `Error: old text not found in ${key}`;
-          if (occurrences > 1) return `Error: old text is ambiguous (found ${occurrences} times) in ${key}`;
+          if (occurrences === 0) throw new ToolError(`old text not found in ${key}`);
+          if (occurrences > 1) throw new ToolError(`old text is ambiguous (found ${occurrences} times) in ${key}`);
 
           const updated = content.replace(oldText, newText);
           await env.MEMORY_BUCKET.put(`memory/${key}`, updated, {
@@ -421,19 +429,19 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           let when: Date | number | null = null;
           if (scheduledAt) {
             const date = new Date(scheduledAt);
-            if (isNaN(date.getTime())) return 'Error: invalid scheduledAt date format. Use ISO 8601 (e.g. 2026-03-26T10:00:00Z)';
-            if (date.getTime() <= Date.now()) return 'Error: scheduledAt must be in the future';
+            if (isNaN(date.getTime())) throw new ToolError('invalid scheduledAt date format. Use ISO 8601 (e.g. 2026-03-26T10:00:00Z)');
+            if (date.getTime() <= Date.now()) throw new ToolError('scheduledAt must be in the future');
             when = date;
           } else if (delaySeconds && delaySeconds > 0) {
             when = delaySeconds;
           }
-          if (!when) return 'Error: provide delaySeconds or scheduledAt';
+          if (!when) throw new ToolError('provide delaySeconds or scheduledAt');
           const payload = JSON.stringify({ prompt });
           try {
             const schedule = await agent.schedule(when, 'executeScheduledTask', payload);
             return `Scheduled one-time task (id: ${schedule.id}): "${prompt}"`;
           } catch (e) {
-            return `Error scheduling task: ${e instanceof Error ? e.message : e}`;
+            throw new ToolError(`scheduling failed: ${e instanceof Error ? e.message : e}`);
           }
         },
       }),
@@ -449,13 +457,13 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           required: ['prompt', 'intervalSeconds'],
         }),
         execute: async ({ prompt, intervalSeconds }) => {
-          if (!intervalSeconds || intervalSeconds < 10) return 'Error: intervalSeconds must be at least 10';
+          if (!intervalSeconds || intervalSeconds < 10) throw new ToolError('intervalSeconds must be at least 10');
           const payload = JSON.stringify({ prompt });
           try {
             const schedule = await agent.scheduleEvery(intervalSeconds, 'executeScheduledTask', payload);
             return `Scheduled recurring task every ${intervalSeconds}s (id: ${schedule.id}): "${prompt}"`;
           } catch (e) {
-            return `Error scheduling task: ${e instanceof Error ? e.message : e}`;
+            throw new ToolError(`scheduling failed: ${e instanceof Error ? e.message : e}`);
           }
         },
       }),
@@ -597,7 +605,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
             }
 
             if (server?.state === 'failed') {
-              return `Failed to connect to "${name}": ${server.error || 'unknown error'}`;
+              throw new ToolError(`failed to connect to "${name}": ${server.error || 'unknown error'}`);
             }
 
             if (server?.state === 'ready') {
@@ -610,7 +618,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             console.error(`[MCP] addMcpServer failed:`, errMsg);
-            return `Failed to connect: ${errMsg}`;
+            throw new ToolError(`failed to connect: ${errMsg}`);
           }
         },
       }),
@@ -627,11 +635,11 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
             // Look up the server ID by name
             const state = agent.getMcpServers();
             const entry = Object.entries(state.servers).find(([, s]) => s.name === name);
-            if (!entry) return `No MCP server found with name: ${name}`;
+            if (!entry) throw new ToolError(`no MCP server found with name: ${name}`);
             await agent.removeMcpServer(entry[0]);
             return `Disconnected MCP server: ${name}`;
           } catch (e) {
-            return `Failed to disconnect: ${e instanceof Error ? e.message : e}`;
+            throw new ToolError(`failed to disconnect: ${e instanceof Error ? e.message : e}`);
           }
         },
       }),
@@ -660,7 +668,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           });
           const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
           if (!result.success) {
-            return `Exit code ${result.exitCode}\n${output}`.trim();
+            throw new ToolError(`exit code ${result.exitCode}\n${output}`.trim());
           }
           return output || '(no output)';
         },
