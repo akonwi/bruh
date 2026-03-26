@@ -1062,7 +1062,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
   // --- Session summaries ---
 
-  private async writeSessionSummary(latestResponse: string): Promise<void> {
+  private async writeSessionSummary(_latestResponse: string): Promise<void> {
     try {
       const sessionId = this.state.sessionId || this.name
       if (!sessionId) return
@@ -1086,7 +1086,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         if (textPart && 'text' in textPart) {
           const text =
             textPart.text.length > 200
-              ? textPart.text.slice(0, 200) + '…'
+              ? `${textPart.text.slice(0, 200)}…`
               : textPart.text
           lines.push(`**${role}:** ${text}`, '')
         }
