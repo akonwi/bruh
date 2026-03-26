@@ -14,7 +14,11 @@ interface MessageMarkdownProps {
   className?: string
 }
 
-export function MessageMarkdown({ content, tone = 'assistant', className }: MessageMarkdownProps) {
+export function MessageMarkdown({
+  content,
+  tone = 'assistant',
+  className,
+}: MessageMarkdownProps) {
   return (
     <div
       className={cn(

@@ -1,7 +1,4 @@
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState, useMemo } from 'react'
-import { useAgent } from 'agents/react'
 import { useAgentChat } from '@cloudflare/ai-chat/react'
-import type { UIMessage } from 'ai'
 import {
   ArrowSquareOut,
   CaretRight,
@@ -11,53 +8,68 @@ import {
   WarningCircle,
   Wrench,
 } from '@phosphor-icons/react'
+import { useAgent } from 'agents/react'
+import type { UIMessage } from 'ai'
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import { AppSidebar } from '@/components/app-sidebar'
 import { MessageMarkdown } from '@/components/message-markdown'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar'
 import { Textarea } from '@/components/ui/textarea'
-import { cn } from '@/lib/utils'
 import { useSystemTheme } from '@/hooks/use-theme'
 import {
   createSession,
+  followUpSession,
   getMainSession,
   listSessions,
-  steerSession,
-  followUpSession,
   type SessionState,
+  steerSession,
 } from '@/lib/api'
+import { cn } from '@/lib/utils'
 
 const MAIN_SESSION_ID = 'main'
 
 interface McpServerInfo {
-  name: string;
-  state: string;
-  server_url: string;
-  error: string | null;
+  name: string
+  state: string
+  server_url: string
+  error: string | null
 }
 
 interface McpState {
-  servers: Record<string, McpServerInfo>;
-  tools: Array<{ name: string; serverId: string }>;
+  servers: Record<string, McpServerInfo>
+  tools: Array<{ name: string; serverId: string }>
 }
 
-type AppRoute =
-  | { kind: 'main' }
-  | { kind: 'thread'; sessionId: string }
+type AppRoute = { kind: 'main' } | { kind: 'thread'; sessionId: string }
 
 function parseRoute(pathname: string): AppRoute {
   if (pathname === '/' || pathname === '') return { kind: 'main' }
   const threadMatch = pathname.match(/^\/threads\/([^/]+)$/)
-  if (threadMatch?.[1]) return { kind: 'thread', sessionId: decodeURIComponent(threadMatch[1]) }
+  if (threadMatch?.[1])
+    return { kind: 'thread', sessionId: decodeURIComponent(threadMatch[1]) }
   return { kind: 'main' }
 }
 
 function getRoutePath(route: AppRoute): string {
   switch (route.kind) {
-    case 'main': return '/'
-    case 'thread': return `/threads/${encodeURIComponent(route.sessionId)}`
+    case 'main':
+      return '/'
+    case 'thread':
+      return `/threads/${encodeURIComponent(route.sessionId)}`
   }
 }
 
@@ -69,10 +81,16 @@ function formatMessageTime(timestamp: string | Date | undefined): string {
   if (!timestamp) return ''
   const value = new Date(timestamp)
   if (Number.isNaN(value.getTime())) return ''
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(value)
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(value)
 }
 
-function formatToolName(toolName: string, mcpServerNames?: Map<string, string>): string {
+function formatToolName(
+  toolName: string,
+  mcpServerNames?: Map<string, string>,
+): string {
   // MCP tools are namespaced as "{serverId}_{toolName}" — IDs vary in length
   if (mcpServerNames && mcpServerNames.size > 0) {
     for (const [id, name] of mcpServerNames) {
@@ -98,7 +116,15 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
 
 // --- Chat view using useAgentChat ---
 
-function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; agent: any; mcpServerNames: Map<string, string> }) {
+function ChatView({
+  sessionId,
+  agent,
+  mcpServerNames,
+}: {
+  sessionId: string
+  agent: any
+  mcpServerNames: Map<string, string>
+}) {
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
@@ -145,7 +171,12 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
   }, [input, isLoading, queueMode, sessionId, sendMessage])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    )
+      return
     event.preventDefault()
     handleSend()
   }
@@ -158,14 +189,17 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
         onScroll={() => {
           const el = scrollRef.current
           if (!el) return
-          isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+          isNearBottomRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
       >
         <div className='flex min-h-full flex-col justify-end gap-4 px-2 py-4'>
           {messages.length === 0 ? (
             <div className='flex min-h-[40vh] flex-col items-center justify-center gap-4 border border-dashed bg-card/70 px-6 py-12 text-center'>
               <h3 className='text-2xl font-semibold tracking-tight'>
-                {sessionId === MAIN_SESSION_ID ? 'This is your main thread' : 'This thread is ready'}
+                {sessionId === MAIN_SESSION_ID
+                  ? 'This is your main thread'
+                  : 'This thread is ready'}
               </h3>
               <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
                 {sessionId === MAIN_SESSION_ID
@@ -174,10 +208,21 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
               </p>
             </div>
           ) : (
-            messages.map((message) => <MessageItem key={message.id} message={message} mcpServerNames={mcpServerNames} />)
+            messages.map((message) => (
+              <MessageItem
+                key={message.id}
+                message={message}
+                mcpServerNames={mcpServerNames}
+              />
+            ))
           )}
 
-          {isLoading && !messages.some(m => m.role === 'assistant' && m.parts?.some(p => p.type === 'text' && p.text)) ? (
+          {isLoading &&
+          !messages.some(
+            (m) =>
+              m.role === 'assistant' &&
+              m.parts?.some((p) => p.type === 'text' && p.text),
+          ) ? (
             <div className='flex justify-start'>
               <div className='inline-flex items-center gap-2 border bg-background px-3 py-2 text-sm text-muted-foreground shadow-sm'>
                 <SpinnerGap className='size-4 animate-spin' />
@@ -203,7 +248,11 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={sessionId === MAIN_SESSION_ID ? 'Message Main…' : 'Message this thread…'}
+              placeholder={
+                sessionId === MAIN_SESSION_ID
+                  ? 'Message Main…'
+                  : 'Message this thread…'
+              }
               className='min-h-24 resize-none border-0 text-sm sm:text-[15px]'
             />
             <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
@@ -214,14 +263,18 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
                     <div className='flex items-center gap-1'>
                       <Button
                         size='xs'
-                        variant={queueMode === 'steer' ? 'secondary' : 'outline'}
+                        variant={
+                          queueMode === 'steer' ? 'secondary' : 'outline'
+                        }
                         onClick={() => setQueueMode('steer')}
                       >
                         Steer
                       </Button>
                       <Button
                         size='xs'
-                        variant={queueMode === 'follow-up' ? 'secondary' : 'outline'}
+                        variant={
+                          queueMode === 'follow-up' ? 'secondary' : 'outline'
+                        }
                         onClick={() => setQueueMode('follow-up')}
                       >
                         Follow-up
@@ -239,7 +292,11 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
                 ) : null}
                 <Button onClick={handleSend} disabled={!input.trim()}>
                   <ArrowSquareOut data-icon='inline-start' />
-                  {isLoading ? (queueMode === 'steer' ? 'Steer' : 'Follow-up') : 'Send'}
+                  {isLoading
+                    ? queueMode === 'steer'
+                      ? 'Steer'
+                      : 'Follow-up'
+                    : 'Send'}
                 </Button>
               </div>
             </div>
@@ -252,7 +309,13 @@ function ChatView({ sessionId, agent, mcpServerNames }: { sessionId: string; age
 
 // --- Message rendering ---
 
-function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServerNames: Map<string, string> }) {
+function MessageItem({
+  message,
+  mcpServerNames,
+}: {
+  message: UIMessage
+  mcpServerNames: Map<string, string>
+}) {
   const isUser = message.role === 'user'
 
   return (
@@ -264,10 +327,28 @@ function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServe
             : 'border bg-background text-card-foreground shadow-sm'
 
           return (
-            <div key={i} className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
-              <div className={cn('max-w-[88%] px-3 py-2 sm:max-w-[78%]', bubbleClasses)}>
-                <MessageMarkdown content={part.text} tone={isUser ? 'user' : 'assistant'} />
-                <p className={cn('mt-1 text-[11px]', isUser ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+            <div
+              key={i}
+              className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
+            >
+              <div
+                className={cn(
+                  'max-w-[88%] px-3 py-2 sm:max-w-[78%]',
+                  bubbleClasses,
+                )}
+              >
+                <MessageMarkdown
+                  content={part.text}
+                  tone={isUser ? 'user' : 'assistant'}
+                />
+                <p
+                  className={cn(
+                    'mt-1 text-[11px]',
+                    isUser
+                      ? 'text-primary-foreground/70'
+                      : 'text-muted-foreground',
+                  )}
+                >
                   {formatMessageTime((message as any).createdAt)}
                 </p>
               </div>
@@ -276,7 +357,13 @@ function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServe
         }
 
         if (part.type && part.type.startsWith('tool-')) {
-          return <ToolPart key={i} part={part as any} mcpServerNames={mcpServerNames} />
+          return (
+            <ToolPart
+              key={i}
+              part={part as any}
+              mcpServerNames={mcpServerNames}
+            />
+          )
         }
 
         return null
@@ -285,15 +372,29 @@ function MessageItem({ message, mcpServerNames }: { message: UIMessage; mcpServe
   )
 }
 
-function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<string, string> }) {
+function ToolPart({
+  part,
+  mcpServerNames,
+}: {
+  part: any
+  mcpServerNames: Map<string, string>
+}) {
   // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
-  const rawToolName: string = part.toolName ?? (typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : 'unknown')
+  const rawToolName: string =
+    part.toolName ??
+    (typeof part.type === 'string' && part.type.startsWith('tool-')
+      ? part.type.slice(5)
+      : 'unknown')
   // rawToolName already has the full namespaced name — formatToolName handles the lookup
   const toolName = formatToolName(rawToolName, mcpServerNames)
 
   // AI SDK v6 tool states: call, partial-call, input-streaming, output-available, output-error, output-denied
-  const isRunning = part.state === 'call' || part.state === 'partial-call' || part.state === 'input-streaming'
-  const isError = part.state === 'output-error' || part.state === 'output-denied'
+  const isRunning =
+    part.state === 'call' ||
+    part.state === 'partial-call' ||
+    part.state === 'input-streaming'
+  const isError =
+    part.state === 'output-error' || part.state === 'output-denied'
   const isDone = part.state === 'output-available' || isError
 
   const panelTone = isRunning
@@ -308,24 +409,42 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
       ? 'text-destructive'
       : 'text-emerald-600 dark:text-emerald-300'
 
-  const rawOutput = isError ? (part.errorText ?? part.output ?? part.result) : (part.output ?? part.result)
-  const resultText = isDone && rawOutput != null
-    ? typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
-    : null
+  const rawOutput = isError
+    ? (part.errorText ?? part.output ?? part.result)
+    : (part.output ?? part.result)
+  const resultText =
+    isDone && rawOutput != null
+      ? typeof rawOutput === 'string'
+        ? rawOutput
+        : JSON.stringify(rawOutput, null, 2)
+      : null
 
   const rawInput = part.input ?? part.args
 
   return (
     <div className='flex justify-start'>
-      <details className={cn('group w-full max-w-[88%] border shadow-sm sm:max-w-[78%]', panelTone)}>
+      <details
+        className={cn(
+          'group w-full max-w-[88%] border shadow-sm sm:max-w-[78%]',
+          panelTone,
+        )}
+      >
         <summary className='flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden'>
           <div className='min-w-0 flex items-center gap-2'>
             {isRunning ? (
-              <SpinnerGap className={cn('size-4 shrink-0 animate-spin', iconTone)} />
+              <SpinnerGap
+                className={cn('size-4 shrink-0 animate-spin', iconTone)}
+              />
             ) : isError ? (
-              <WarningCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
+              <WarningCircle
+                weight='fill'
+                className={cn('size-4 shrink-0', iconTone)}
+              />
             ) : (
-              <CheckCircle weight='fill' className={cn('size-4 shrink-0', iconTone)} />
+              <CheckCircle
+                weight='fill'
+                className={cn('size-4 shrink-0', iconTone)}
+              />
             )}
             <p className='truncate text-sm font-medium text-foreground'>
               {truncateInline(toolName)}
@@ -340,16 +459,29 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
           </div>
           {rawInput ? (
             <div className='mb-2'>
-              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>Input</p>
+              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                Input
+              </p>
               <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground'>
-                {typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2)}
+                {typeof rawInput === 'string'
+                  ? rawInput
+                  : JSON.stringify(rawInput, null, 2)}
               </pre>
             </div>
           ) : null}
           {resultText ? (
             <div>
-              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>Output</p>
-              <pre className={cn('overflow-x-auto whitespace-pre-wrap break-words leading-5', isError && 'text-destructive')}>{resultText}</pre>
+              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                Output
+              </p>
+              <pre
+                className={cn(
+                  'overflow-x-auto whitespace-pre-wrap break-words leading-5',
+                  isError && 'text-destructive',
+                )}
+              >
+                {resultText}
+              </pre>
             </div>
           ) : isRunning ? (
             <p className='text-muted-foreground'>Running…</p>
@@ -365,17 +497,23 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
 // --- Main App ---
 
 function App() {
-  const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.pathname))
+  const [route, setRoute] = useState<AppRoute>(() =>
+    parseRoute(window.location.pathname),
+  )
   const [sessions, setSessions] = useState<SessionState[]>([])
   const [isCreating, setIsCreating] = useState(false)
   useSystemTheme()
 
-  const navigateTo = useCallback((nextRoute: AppRoute, options?: { replace?: boolean }) => {
-    const nextPath = getRoutePath(nextRoute)
-    const method = options?.replace ? 'replaceState' : 'pushState'
-    if (window.location.pathname !== nextPath) window.history[method](null, '', nextPath)
-    setRoute(nextRoute)
-  }, [])
+  const navigateTo = useCallback(
+    (nextRoute: AppRoute, options?: { replace?: boolean }) => {
+      const nextPath = getRoutePath(nextRoute)
+      const method = options?.replace ? 'replaceState' : 'pushState'
+      if (window.location.pathname !== nextPath)
+        window.history[method](null, '', nextPath)
+      setRoute(nextRoute)
+    },
+    [],
+  )
 
   useEffect(() => {
     const handlePopState = () => setRoute(parseRoute(window.location.pathname))
@@ -395,7 +533,10 @@ function App() {
     void getMainSession().catch(() => {})
   }, [])
 
-  const handleNavigateMain = useCallback(() => navigateTo({ kind: 'main' }), [navigateTo])
+  const handleNavigateMain = useCallback(
+    () => navigateTo({ kind: 'main' }),
+    [navigateTo],
+  )
 
   const handleCreateThread = async () => {
     setIsCreating(true)
@@ -410,14 +551,23 @@ function App() {
     }
   }
 
-  const handleOpenThread = useCallback((sessionId: string) => {
-    navigateTo({ kind: 'thread', sessionId })
-  }, [navigateTo])
+  const handleOpenThread = useCallback(
+    (sessionId: string) => {
+      navigateTo({ kind: 'thread', sessionId })
+    },
+    [navigateTo],
+  )
 
-  const sessionId = route.kind === 'main' ? MAIN_SESSION_ID : route.kind === 'thread' ? route.sessionId : null
+  const sessionId =
+    route.kind === 'main'
+      ? MAIN_SESSION_ID
+      : route.kind === 'thread'
+        ? route.sessionId
+        : null
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const activeThreadId = route.kind === 'thread' ? route.sessionId : null
-  const activeTitle = route.kind === 'main' ? 'Main' : `Thread ${shortId(route.sessionId)}`
+  const activeTitle =
+    route.kind === 'main' ? 'Main' : `Thread ${shortId(route.sessionId)}`
 
   // Agent connection — lives here so MCP state is available to sidebar
   const [mcpState, setMcpState] = useState<McpState>({ servers: {}, tools: [] })
@@ -427,7 +577,10 @@ function App() {
     onMcpUpdate: (state) => setMcpState(state as McpState),
   })
 
-  const mcpServers = useMemo(() => Object.values(mcpState.servers), [mcpState.servers])
+  const mcpServers = useMemo(
+    () => Object.values(mcpState.servers),
+    [mcpState.servers],
+  )
   const mcpServerNames = useMemo(() => {
     const map = new Map<string, string>()
     for (const [id, server] of Object.entries(mcpState.servers)) {
@@ -453,12 +606,19 @@ function App() {
         <header className='sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur'>
           <div className='flex items-center gap-2 px-4'>
             <SidebarTrigger className='-ml-1' />
-            <Separator orientation='vertical' className='mr-2 !self-auto data-[orientation=vertical]:h-4' />
+            <Separator
+              orientation='vertical'
+              className='mr-2 !self-auto data-[orientation=vertical]:h-4'
+            />
             <span className='truncate text-sm font-medium'>{activeTitle}</span>
           </div>
         </header>
 
-        <ChatView sessionId={sessionId!} agent={agent} mcpServerNames={mcpServerNames} />
+        <ChatView
+          sessionId={sessionId!}
+          agent={agent}
+          mcpServerNames={mcpServerNames}
+        />
       </SidebarInset>
     </SidebarProvider>
   )

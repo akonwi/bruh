@@ -1,79 +1,84 @@
-const ALLOWED_ROOTS = new Set(['memory', 'artifacts']);
+const ALLOWED_ROOTS = new Set(['memory', 'artifacts'])
 
 export interface StorageObjectPayload {
-  path: string;
-  content: string;
-  etag: string;
-  version: string;
-  size: number;
-  uploadedAt: string;
-  contentType?: string;
+  path: string
+  content: string
+  etag: string
+  version: string
+  size: number
+  uploadedAt: string
+  contentType?: string
 }
 
 export interface StorageListFile {
-  path: string;
-  etag: string;
-  version: string;
-  size: number;
-  uploadedAt: string;
+  path: string
+  etag: string
+  version: string
+  size: number
+  uploadedAt: string
 }
 
 export interface StorageListPayload {
-  prefix: string;
-  directories: string[];
-  files: StorageListFile[];
-  truncated: boolean;
-  cursor?: string;
+  prefix: string
+  directories: string[]
+  files: StorageListFile[]
+  truncated: boolean
+  cursor?: string
 }
 
 function normalizeSlashes(value: string): string {
-  return value.replaceAll('\\', '/').replace(/^\/+/, '');
+  return value.replaceAll('\\', '/').replace(/^\/+/, '')
 }
 
 function validateSegments(value: string): void {
-  const segments = value.split('/');
+  const segments = value.split('/')
   for (const segment of segments) {
     if (!segment) {
-      throw new Error('Paths may not contain empty segments.');
+      throw new Error('Paths may not contain empty segments.')
     }
 
     if (segment === '.' || segment === '..') {
-      throw new Error('Paths may not contain relative path segments.');
+      throw new Error('Paths may not contain relative path segments.')
     }
   }
 }
 
 function validateAllowedRoot(value: string): void {
-  const [root] = value.split('/');
+  const [root] = value.split('/')
   if (!root || !ALLOWED_ROOTS.has(root)) {
-    throw new Error(`Paths must start with one of: ${[...ALLOWED_ROOTS].join(', ')}.`);
+    throw new Error(
+      `Paths must start with one of: ${[...ALLOWED_ROOTS].join(', ')}.`,
+    )
   }
 }
 
 export function normalizeStoragePath(input: string): string {
-  const normalized = normalizeSlashes(input.trim());
+  const normalized = normalizeSlashes(input.trim())
   if (!normalized) {
-    throw new Error('path is required');
+    throw new Error('path is required')
   }
 
-  validateSegments(normalized);
-  validateAllowedRoot(normalized);
-  return normalized;
+  validateSegments(normalized)
+  validateAllowedRoot(normalized)
+  return normalized
 }
 
 export function normalizeStoragePrefix(input?: string | null): string {
-  const normalized = normalizeSlashes((input ?? '').trim());
+  const normalized = normalizeSlashes((input ?? '').trim())
   if (!normalized) {
-    return '';
+    return ''
   }
 
-  const prefix = normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
-  validateSegments(prefix);
-  validateAllowedRoot(prefix);
-  return normalized.endsWith('/') ? normalized : `${normalized}/`;
+  const prefix = normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
+  validateSegments(prefix)
+  validateAllowedRoot(prefix)
+  return normalized.endsWith('/') ? normalized : `${normalized}/`
 }
 
-export function toStorageObjectPayload(object: R2ObjectBody, content: string): StorageObjectPayload {
+export function toStorageObjectPayload(
+  object: R2ObjectBody,
+  content: string,
+): StorageObjectPayload {
   return {
     path: object.key,
     content,
@@ -82,7 +87,7 @@ export function toStorageObjectPayload(object: R2ObjectBody, content: string): S
     size: object.size,
     uploadedAt: object.uploaded.toISOString(),
     contentType: object.httpMetadata?.contentType,
-  };
+  }
 }
 
 export function toStorageListFile(object: R2Object): StorageListFile {
@@ -92,7 +97,7 @@ export function toStorageListFile(object: R2Object): StorageListFile {
     version: object.version,
     size: object.size,
     uploadedAt: object.uploaded.toISOString(),
-  };
+  }
 }
 
 export function buildStorageListPayload(
@@ -105,5 +110,5 @@ export function buildStorageListPayload(
     files: objects.objects.map(toStorageListFile),
     truncated: objects.truncated,
     cursor: objects.truncated ? objects.cursor : undefined,
-  };
+  }
 }

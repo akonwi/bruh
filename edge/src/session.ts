@@ -1,40 +1,40 @@
-export type SessionStatus = 'idle' | 'active';
+export type SessionStatus = 'idle' | 'active'
 
 export interface SessionMetadata {
-  sessionId: string;
-  createdAt: string;
-  updatedAt: string;
-  latestSeq: number;
-  status: SessionStatus;
-  title?: string;
+  sessionId: string
+  createdAt: string
+  updatedAt: string
+  latestSeq: number
+  status: SessionStatus
+  title?: string
 }
 
 export interface SessionEventEnvelope {
-  sessionId: string;
-  seq: number;
-  type: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
+  sessionId: string
+  seq: number
+  type: string
+  timestamp: string
+  payload: Record<string, unknown>
 }
 
 export interface SessionPromptRequest {
-  text: string;
+  text: string
 }
 
 export interface SessionIndexEntry {
-  sessionId: string;
-  createdAt: string;
+  sessionId: string
+  createdAt: string
 }
 
-import type { BruhAgent } from './bruh-agent';
-import type { Sandbox } from '@cloudflare/sandbox';
+import type { Sandbox } from '@cloudflare/sandbox'
+import type { BruhAgent } from './bruh-agent'
 
 export interface Env {
-  BRUH_AGENT: DurableObjectNamespace<BruhAgent>;
-  SANDBOX: DurableObjectNamespace<Sandbox>;
-  MEMORY_BUCKET: R2Bucket;
-  ASSETS?: Fetcher;
-  ANTHROPIC_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  INTERNAL_API_SECRET?: string;
+  BRUH_AGENT: DurableObjectNamespace<BruhAgent>
+  SANDBOX: DurableObjectNamespace<Sandbox>
+  MEMORY_BUCKET: R2Bucket
+  ASSETS?: Fetcher
+  ANTHROPIC_API_KEY?: string
+  OPENAI_API_KEY?: string
+  INTERNAL_API_SECRET?: string
 }

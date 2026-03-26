@@ -1,14 +1,21 @@
-import { ChatsTeardrop, ClockCounterClockwise, House, Lightning, Plus, WarningCircle } from '@phosphor-icons/react'
+import {
+  ChatsTeardrop,
+  ClockCounterClockwise,
+  House,
+  Lightning,
+  Plus,
+  WarningCircle,
+} from '@phosphor-icons/react'
 
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarGroupAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -47,7 +54,11 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   mcpToolCount: number
 }
 
-function SidebarHeaderContent({ onNavigateMain }: { onNavigateMain: () => void }) {
+function SidebarHeaderContent({
+  onNavigateMain,
+}: {
+  onNavigateMain: () => void
+}) {
   const { state } = useSidebar()
   const collapsed = state === 'collapsed'
 
@@ -61,7 +72,9 @@ function SidebarHeaderContent({ onNavigateMain }: { onNavigateMain: () => void }
           {!collapsed ? (
             <div className='grid flex-1 text-left text-sm leading-tight'>
               <span className='truncate font-semibold'>Main</span>
-              <span className='truncate text-xs text-sidebar-foreground/70'>Bruh</span>
+              <span className='truncate text-xs text-sidebar-foreground/70'>
+                Bruh
+              </span>
             </div>
           ) : null}
         </SidebarMenuButton>
@@ -86,7 +99,12 @@ function McpServerItem({ server }: { server: McpServerInfo }) {
   return (
     <div className='flex items-center gap-2 px-2 py-1'>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotColor)} />
-      <span className={cn('min-w-0 truncate text-xs', isFailed ? 'text-destructive' : 'text-sidebar-foreground/70')}>
+      <span
+        className={cn(
+          'min-w-0 truncate text-xs',
+          isFailed ? 'text-destructive' : 'text-sidebar-foreground/70',
+        )}
+      >
         {server.name}
       </span>
       {isFailed ? (
@@ -111,7 +129,10 @@ function formatRelativeTime(timestamp: string): string {
   if (diffHours < 24) return `${diffHours}h`
   const diffDays = Math.round(diffHours / 24)
   if (diffDays < 7) return `${diffDays}d`
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(timestamp))
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(timestamp))
 }
 
 function sortSessions(sessions: SessionState[]): SessionState[] {
@@ -177,8 +198,7 @@ export function AppSidebar({
               </SidebarMenuSub>
             )}
 
-            <SidebarMenuItem>
-            </SidebarMenuItem>
+            <SidebarMenuItem></SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
@@ -190,7 +210,9 @@ export function AppSidebar({
               <Lightning className='size-3' />
               <span>MCP Servers</span>
               {mcpToolCount > 0 ? (
-                <span className='text-[10px] text-sidebar-foreground/50'>({mcpToolCount} tools)</span>
+                <span className='text-[10px] text-sidebar-foreground/50'>
+                  ({mcpToolCount} tools)
+                </span>
               ) : null}
             </SidebarGroupLabel>
             <div className='flex flex-col gap-0.5'>
@@ -200,7 +222,6 @@ export function AppSidebar({
             </div>
           </SidebarGroup>
         ) : null}
-
       </SidebarFooter>
 
       <SidebarRail />
