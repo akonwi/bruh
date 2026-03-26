@@ -357,15 +357,24 @@ function ToolPart({ part, mcpServerNames }: { part: any; mcpServerNames: Map<str
             <Wrench className='size-3.5' />
             <span>{toolName}</span>
           </div>
+          {rawInput ? (
+            <div className='mb-2'>
+              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>Input</p>
+              <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground'>
+                {typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2)}
+              </pre>
+            </div>
+          ) : null}
           {resultText ? (
-            <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5'>{resultText}</pre>
-          ) : rawInput ? (
-            <pre className='overflow-x-auto whitespace-pre-wrap break-words leading-5 text-muted-foreground'>
-              {typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2)}
-            </pre>
-          ) : (
-            <p className='text-muted-foreground'>{isRunning ? 'Running…' : 'No output'}</p>
-          )}
+            <div>
+              <p className='mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>Output</p>
+              <pre className={cn('overflow-x-auto whitespace-pre-wrap break-words leading-5', isError && 'text-destructive')}>{resultText}</pre>
+            </div>
+          ) : isRunning ? (
+            <p className='text-muted-foreground'>Running…</p>
+          ) : !rawInput ? (
+            <p className='text-muted-foreground'>No output</p>
+          ) : null}
         </div>
       </details>
     </div>
