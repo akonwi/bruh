@@ -141,7 +141,16 @@ function ChatView({
   agent: AgentConnection
   mcpServerNames: Map<string, string>
 }) {
-  const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
+  const clientTimezone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+
+  const { messages, sendMessage, stop, error, status } = useAgentChat({
+    agent,
+    body: () => ({
+      clientTimezone,
+      clientNowIso: new Date().toISOString(),
+    }),
+  })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
   const isLoading = status === 'streaming' || status === 'submitted'

@@ -103,6 +103,8 @@ interface BruhState {
   createdAt: string
   updatedAt: string
   latestSeq: number
+  clientTimeZone?: string
+  clientNowIso?: string
 }
 
 type SandboxListFileEntry = NonNullable<
@@ -143,6 +145,7 @@ All threads share the same memory.
 
 ## Scheduling
 You can schedule one-time or recurring tasks. Each scheduled task is a prompt that you (the agent) execute at the scheduled time. The result appears in the message transcript so the user can see what happened. Use schedule_once for one-time tasks and schedule_recurring for repeated tasks.
+Before scheduling from natural language times (e.g. "in 2 minutes", "tomorrow at 8am"), call current_time first and compute from that reference.
 
 ## Threads
 You run as the main thread or a side thread. Use thread tools to list and read summaries of other threads.
@@ -198,6 +201,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     latestSeq: 0,
+    clientTimeZone: undefined,
+    clientNowIso: undefined,
   }
 
   // Wait up to 10s for MCP servers to connect before handling chat messages
@@ -523,6 +528,63 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
       // --- Scheduling tools ---
 
+      current_time: createTool<{ timezone?: string }>({
+        description:
+          'Get the current trusted time reference. Returns UTC now, epoch milliseconds, and local time in a timezone (defaults to client timezone when available).',
+        parameters: jsonSchema<{ timezone?: string }>({
+          type: 'object',
+          properties: {
+            timezone: {
+              type: 'string',
+              description:
+                'Optional IANA timezone (e.g. America/New_York). Defaults to client timezone if known, else UTC.',
+            },
+          },
+        }),
+        execute: async ({ timezone }) => {
+          const now = new Date()
+          const requestedZone = timezone?.trim()
+          const fallbackZone = this.state.clientTimeZone?.trim() || 'UTC'
+          const chosenZone = requestedZone || fallbackZone
+
+          let resolvedZone = chosenZone
+          try {
+            // Validate timezone
+            new Intl.DateTimeFormat('en-US', { timeZone: chosenZone }).format(now)
+          } catch {
+            if (requestedZone) {
+              throw new ToolError(`invalid timezone: ${requestedZone}`)
+            }
+            resolvedZone = 'UTC'
+          }
+
+          const localFormatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: resolvedZone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+            timeZoneName: 'short',
+          })
+
+          return JSON.stringify(
+            {
+              utcIso: now.toISOString(),
+              epochMs: now.getTime(),
+              timezone: resolvedZone,
+              localTime: localFormatter.format(now),
+              clientTimezone: this.state.clientTimeZone || null,
+              clientNowIso: this.state.clientNowIso || null,
+            },
+            null,
+            2,
+          )
+        },
+      }),
+
       schedule_once: createTool<{
         prompt: string
         delaySeconds?: number
@@ -634,7 +696,24 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           if (schedules.length === 0) return 'No active schedules.'
           return schedules
             .map((s) => {
-              const time = s.time ? new Date(s.time).toISOString() : 'recurring'
+              const rawTime = s.time
+              let time = 'recurring'
+              if (rawTime != null) {
+                const numeric =
+                  typeof rawTime === 'number'
+                    ? rawTime
+                    : Number.parseFloat(String(rawTime))
+                if (Number.isFinite(numeric)) {
+                  // Some scheduler runtimes return epoch seconds, others epoch ms.
+                  // Treat values < 1e11 as seconds (good through year 5138).
+                  const epochMs = numeric < 100_000_000_000 ? numeric * 1000 : numeric
+                  const asDate = new Date(epochMs)
+                  if (!Number.isNaN(asDate.getTime())) {
+                    time = asDate.toISOString()
+                  }
+                }
+              }
+
               const payload =
                 typeof s.payload === 'string'
                   ? JSON.parse(s.payload)
@@ -1366,6 +1445,20 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     options?: OnChatMessageOptions,
   ): Promise<Response | undefined> {
     const model = this.getModel()
+
+    const body = options?.body ?? {}
+    const clientTimeZone =
+      typeof body.clientTimezone === 'string' ? body.clientTimezone.trim() : ''
+    const clientNowIso =
+      typeof body.clientNowIso === 'string' ? body.clientNowIso.trim() : ''
+    if (clientTimeZone || clientNowIso) {
+      this.setState({
+        ...this.state,
+        ...(clientTimeZone ? { clientTimeZone } : {}),
+        ...(clientNowIso ? { clientNowIso } : {}),
+      })
+    }
+
     const tools = this.getRuntimeTools(true)
 
     // Set title from first user message
@@ -1559,10 +1652,24 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   // --- HTTP prompt / steer / follow-up / abort ---
 
   private async handleHttpPrompt(request: Request): Promise<Response> {
-    const body = (await request.json().catch(() => ({}))) as { text?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      text?: string
+      clientTimezone?: string
+      clientNowIso?: string
+    }
     const text = body.text?.trim()
     if (!text)
       return Response.json({ error: 'text is required' }, { status: 400 })
+
+    const clientTimeZone = body.clientTimezone?.trim()
+    const clientNowIso = body.clientNowIso?.trim()
+    if (clientTimeZone || clientNowIso) {
+      this.setState({
+        ...this.state,
+        ...(clientTimeZone ? { clientTimeZone } : {}),
+        ...(clientNowIso ? { clientNowIso } : {}),
+      })
+    }
 
     if (!this.state.title) {
       this.setState({
