@@ -1478,25 +1478,4 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     }))
   }
 
-  private async appendEvent(
-    type: string,
-    payload: Record<string, unknown>,
-    timestamp?: string,
-  ): Promise<SessionEventEnvelope> {
-    const now = new Date().toISOString()
-    const nextSeq = this.state.latestSeq + 1
-    this.setState({ ...this.state, latestSeq: nextSeq, updatedAt: now })
-
-    const event: SessionEventEnvelope = {
-      sessionId: this.state.sessionId,
-      seq: nextSeq,
-      type,
-      timestamp: timestamp || now,
-      payload,
-    }
-    this
-      .sql`INSERT INTO events (seq, session_id, type, timestamp, payload) VALUES (${event.seq}, ${event.sessionId}, ${event.type}, ${event.timestamp}, ${JSON.stringify(event.payload)})`
-    this.sql`DELETE FROM events WHERE seq <= ${nextSeq - 200}`
-    return event
-  }
 }
