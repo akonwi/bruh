@@ -26,6 +26,10 @@ jobs:
       - name: Copy web assets to edge
         run: rm -rf edge/public && cp -r web/dist edge/public
 
+      - name: Strip container config for CI deploy
+        working-directory: edge
+        run: node -e "const f=require('fs');const c=JSON.parse(f.readFileSync('wrangler.jsonc','utf8').replace(/\/\/.*/g,''));delete c.containers;f.writeFileSync('wrangler.jsonc',JSON.stringify(c,null,2))"
+
       - name: Deploy to Cloudflare
         working-directory: edge
         run: npx wrangler deploy
