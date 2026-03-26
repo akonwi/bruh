@@ -540,7 +540,7 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           let when: Date | number | null = null
           if (scheduledAt) {
             const date = new Date(scheduledAt)
-            if (isNaN(date.getTime()))
+            if (Number.isNaN(date.getTime()))
               throw new ToolError(
                 'invalid scheduledAt date format. Use ISO 8601 (e.g. 2026-03-26T10:00:00Z)',
               )
