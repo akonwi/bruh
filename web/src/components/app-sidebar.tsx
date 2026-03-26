@@ -1,10 +1,10 @@
 import {
-  ChatsTeardrop,
-  ClockCounterClockwise,
-  House,
-  Lightning,
-  Plus,
-  WarningCircle,
+  ChatsTeardropIcon,
+  ClockCounterClockwiseIcon,
+  HouseIcon,
+  LightningIcon,
+  PlusIcon,
+  WarningCircleIcon,
 } from '@phosphor-icons/react'
 
 import {
@@ -67,7 +67,7 @@ function SidebarHeaderContent({
       <SidebarMenuItem>
         <SidebarMenuButton size='lg' tooltip='Main' onClick={onNavigateMain}>
           <div className='flex aspect-square size-8 items-center justify-center bg-sidebar-primary text-sidebar-primary-foreground'>
-            <House weight='fill' />
+            <HouseIcon weight='fill' />
           </div>
           {!collapsed ? (
             <div className='grid flex-1 text-left text-sm leading-tight'>
@@ -108,7 +108,7 @@ function McpServerItem({ server }: { server: McpServerInfo }) {
         {server.name}
       </span>
       {isFailed ? (
-        <WarningCircle className='size-3 shrink-0 text-destructive' />
+        <WarningCircleIcon className='size-3 shrink-0 text-destructive' />
       ) : null}
     </div>
   )
@@ -165,7 +165,7 @@ export function AppSidebar({
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className='flex items-center gap-1.5'>
-            <ChatsTeardrop className='size-3.5' />
+            <ChatsTeardropIcon className='size-3.5' />
             <span>Threads</span>
           </SidebarGroupLabel>
           <SidebarGroupAction
@@ -173,7 +173,7 @@ export function AppSidebar({
             disabled={isCreating}
             title='New thread'
           >
-            <Plus />
+            <PlusIcon />
             <span className='sr-only'>New thread</span>
           </SidebarGroupAction>
           <SidebarMenu>
@@ -189,7 +189,7 @@ export function AppSidebar({
                         {session.title?.trim() || shortId(session.sessionId)}
                       </span>
                       <span className='ml-auto flex shrink-0 items-center gap-1 text-[10px] text-sidebar-foreground/50'>
-                        <ClockCounterClockwise className='size-2.5' />
+                        <ClockCounterClockwiseIcon className='size-2.5' />
                         {formatRelativeTime(session.updatedAt)}
                       </span>
                     </SidebarMenuSubButton>
@@ -207,7 +207,7 @@ export function AppSidebar({
         {!collapsed && mcpServers.length > 0 ? (
           <SidebarGroup>
             <SidebarGroupLabel className='flex items-center gap-1.5'>
-              <Lightning className='size-3' />
+              <LightningIcon className='size-3' />
               <span>MCP Servers</span>
               {mcpToolCount > 0 ? (
                 <span className='text-[10px] text-sidebar-foreground/50'>

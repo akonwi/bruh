@@ -1,12 +1,12 @@
 import { useAgentChat } from '@cloudflare/ai-chat/react'
 import {
-  ArrowSquareOut,
-  CaretRight,
-  CheckCircle,
-  SpinnerGap,
-  StopCircle,
-  WarningCircle,
-  Wrench,
+  ArrowSquareOutIcon,
+  CaretRightIcon,
+  CheckCircleIcon,
+  SpinnerGapIcon,
+  StopCircleIcon,
+  WarningCircleIcon,
+  WrenchIcon,
 } from '@phosphor-icons/react'
 import { useAgent } from 'agents/react'
 import {
@@ -240,7 +240,7 @@ function ChatView({
           ) ? (
             <div className='flex justify-start'>
               <div className='inline-flex items-center gap-2 border bg-background px-3 py-2 text-sm text-muted-foreground shadow-sm'>
-                <SpinnerGap className='size-4 animate-spin' />
+                <SpinnerGapIcon className='size-4 animate-spin' />
                 <span>Thinking...</span>
               </div>
             </div>
@@ -301,12 +301,12 @@ function ChatView({
               <div className='flex items-center gap-2'>
                 {isLoading ? (
                   <Button variant='outline' onClick={() => stop()}>
-                    <StopCircle data-icon='inline-start' />
+                    <StopCircleIcon data-icon='inline-start' />
                     Stop
                   </Button>
                 ) : null}
                 <Button onClick={handleSend} disabled={!input.trim()}>
-                  <ArrowSquareOut data-icon='inline-start' />
+                  <ArrowSquareOutIcon data-icon='inline-start' />
                   {isLoading
                     ? queueMode === 'steer'
                       ? 'Steer'
@@ -441,16 +441,16 @@ function ToolPart({
         <summary className='flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden'>
           <div className='min-w-0 flex items-center gap-2'>
             {isRunning ? (
-              <SpinnerGap
+              <SpinnerGapIcon
                 className={cn('size-4 shrink-0 animate-spin', iconTone)}
               />
             ) : isError ? (
-              <WarningCircle
+              <WarningCircleIcon
                 weight='fill'
                 className={cn('size-4 shrink-0', iconTone)}
               />
             ) : (
-              <CheckCircle
+              <CheckCircleIcon
                 weight='fill'
                 className={cn('size-4 shrink-0', iconTone)}
               />
@@ -459,11 +459,11 @@ function ToolPart({
               {truncateInline(toolName)}
             </p>
           </div>
-          <CaretRight className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
+          <CaretRightIcon className='size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90' />
         </summary>
         <div className='border-t bg-background/80 px-3 py-3 text-xs text-foreground'>
           <div className='mb-2 flex items-center gap-2 text-muted-foreground'>
-            <Wrench className='size-3.5' />
+            <WrenchIcon className='size-3.5' />
             <span>{toolName}</span>
           </div>
           {rawInput ? (
