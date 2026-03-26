@@ -9,7 +9,13 @@ import {
   Wrench,
 } from '@phosphor-icons/react'
 import { useAgent } from 'agents/react'
-import type { UIMessage } from 'ai'
+import {
+  getToolName,
+  isToolUIPart,
+  type DynamicToolUIPart,
+  type ToolUIPart,
+  type UIMessage,
+} from 'ai'
 import {
   type KeyboardEvent,
   useCallback,
@@ -114,6 +120,15 @@ function sortSessions(sessions: SessionState[]): SessionState[] {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
+type AgentConnection = ReturnType<typeof useAgent<unknown>>
+
+function getMessageCreatedAt(message: UIMessage): string | Date | undefined {
+  if (!('createdAt' in message)) return undefined
+  const value = (message as UIMessage & { createdAt?: unknown }).createdAt
+  if (typeof value === 'string' || value instanceof Date) return value
+  return undefined
+}
+
 // --- Chat view using useAgentChat ---
 
 function ChatView({
@@ -122,7 +137,7 @@ function ChatView({
   mcpServerNames,
 }: {
   sessionId: string
-  agent: any
+  agent: AgentConnection
   mcpServerNames: Map<string, string>
 }) {
   const { messages, sendMessage, stop, error, status } = useAgentChat({ agent })
@@ -349,21 +364,15 @@ function MessageItem({
                       : 'text-muted-foreground',
                   )}
                 >
-                  {formatMessageTime((message as any).createdAt)}
+                  {formatMessageTime(getMessageCreatedAt(message))}
                 </p>
               </div>
             </div>
           )
         }
 
-        if (part.type && part.type.startsWith('tool-')) {
-          return (
-            <ToolPart
-              key={i}
-              part={part as any}
-              mcpServerNames={mcpServerNames}
-            />
-          )
+        if (isToolUIPart(part)) {
+          return <ToolPart key={i} part={part} mcpServerNames={mcpServerNames} />
         }
 
         return null
@@ -376,23 +385,18 @@ function ToolPart({
   part,
   mcpServerNames,
 }: {
-  part: any
+  part: ToolUIPart | DynamicToolUIPart
   mcpServerNames: Map<string, string>
 }) {
-  // AI SDK v6: static tools have type "tool-<name>", dynamic tools have type "dynamic-tool" + toolName
-  const rawToolName: string =
-    part.toolName ??
-    (typeof part.type === 'string' && part.type.startsWith('tool-')
-      ? part.type.slice(5)
-      : 'unknown')
-  // rawToolName already has the full namespaced name — formatToolName handles the lookup
+  const rawToolName = getToolName(part)
   const toolName = formatToolName(rawToolName, mcpServerNames)
 
   // AI SDK v6 tool states: call, partial-call, input-streaming, output-available, output-error, output-denied
   const isRunning =
-    part.state === 'call' ||
-    part.state === 'partial-call' ||
-    part.state === 'input-streaming'
+    part.state === 'input-streaming' ||
+    part.state === 'input-available' ||
+    part.state === 'approval-requested' ||
+    part.state === 'approval-responded'
   const isError =
     part.state === 'output-error' || part.state === 'output-denied'
   const isDone = part.state === 'output-available' || isError
@@ -409,9 +413,14 @@ function ToolPart({
       ? 'text-destructive'
       : 'text-emerald-600 dark:text-emerald-300'
 
+  const legacyPart = part as {
+    args?: unknown
+    result?: unknown
+  }
+
   const rawOutput = isError
-    ? (part.errorText ?? part.output ?? part.result)
-    : (part.output ?? part.result)
+    ? (part.errorText ?? part.output ?? legacyPart.result)
+    : (part.output ?? legacyPart.result)
   const resultText =
     isDone && rawOutput != null
       ? typeof rawOutput === 'string'
@@ -419,7 +428,7 @@ function ToolPart({
         : JSON.stringify(rawOutput, null, 2)
       : null
 
-  const rawInput = part.input ?? part.args
+  const rawInput = part.input ?? legacyPart.args
 
   return (
     <div className='flex justify-start'>
@@ -558,12 +567,7 @@ function App() {
     [navigateTo],
   )
 
-  const sessionId =
-    route.kind === 'main'
-      ? MAIN_SESSION_ID
-      : route.kind === 'thread'
-        ? route.sessionId
-        : null
+  const sessionId = route.kind === 'main' ? MAIN_SESSION_ID : route.sessionId
   const activeSection = route.kind === 'main' ? 'main' : 'threads'
   const activeThreadId = route.kind === 'thread' ? route.sessionId : null
   const activeTitle =
@@ -615,7 +619,7 @@ function App() {
         </header>
 
         <ChatView
-          sessionId={sessionId!}
+          sessionId={sessionId}
           agent={agent}
           mcpServerNames={mcpServerNames}
         />
