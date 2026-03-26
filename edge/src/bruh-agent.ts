@@ -87,6 +87,7 @@ interface BruhEnv {
   MEMORY_BUCKET: R2Bucket
   ANTHROPIC_API_KEY?: string
   OPENAI_API_KEY?: string
+  OPENAI_MODEL?: string
   INTERNAL_API_SECRET?: string
   MCP_SERVERS?: string
   HOST?: string
@@ -364,7 +365,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     if (openaiKey) {
       const openai = createOpenAI({ apiKey: openaiKey })
-      return openai('gpt-4o')
+      const modelName = this.env.OPENAI_MODEL?.trim() || 'gpt-5.4'
+      return openai(modelName)
     }
 
     throw new Error(
