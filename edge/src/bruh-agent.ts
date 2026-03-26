@@ -58,7 +58,14 @@ function createTool<T>(config: {
   parameters: ReturnType<typeof jsonSchema>
   execute: (args: T) => Promise<string>
 }) {
-  return tool({ ...config, inputSchema: config.parameters } as any)
+  // AI SDK v6 tool typing expects `inputSchema`; we provide `parameters`
+  // in our local helper shape and bridge here without using `any`.
+  return tool(
+    {
+      ...config,
+      inputSchema: config.parameters,
+    } as unknown as Parameters<typeof tool>[0],
+  )
 }
 
 class ToolError extends Error {
