@@ -43,6 +43,7 @@ Read first for architectural context:
    - Implement only what was asked.
 4. **Validate locally** (minimum)
    - `bun run typecheck`
+   - `bun run lint` (Biome)
    - For UI changes: run `bun run dev:web` and sanity check relevant views.
    - For edge/tooling changes: run `bun run dev:edge` and verify impacted route/tool behavior.
 5. **Report clearly**
@@ -57,6 +58,10 @@ From repo root:
 - `bun run dev:web` — web only
 - `bun run dev:edge` — edge only
 - `bun run typecheck` — typecheck all workspaces
+- `bun run lint` — run Biome lint checks
+- `bun run format` — run Biome formatter (`--write`)
+- `bun run check:biome` — Biome lint alias
+- `bun run check:biome:full` — Biome full check (lint + formatting/import diagnostics)
 - `bun run deploy:edge` — build web, copy to `edge/public`, deploy worker
 
 ## 6) Frontend conventions (`web/`)
