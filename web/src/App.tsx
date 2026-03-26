@@ -21,7 +21,7 @@ import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { useTheme } from '@/hooks/use-theme'
+import { useSystemTheme } from '@/hooks/use-theme'
 import {
   createSession,
   getMainSession,
@@ -381,7 +381,7 @@ function App() {
   const [isLoadingSessions, setIsLoadingSessions] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { theme, setTheme } = useTheme()
+  useSystemTheme()
 
   const navigateTo = useCallback((nextRoute: AppRoute, options?: { replace?: boolean }) => {
     const nextPath = getRoutePath(nextRoute)
@@ -471,8 +471,6 @@ function App() {
         isCreating={isCreating}
         mcpServers={mcpServers}
         mcpToolCount={mcpState.tools.length}
-        theme={theme}
-        onThemeChange={setTheme}
       />
       <SidebarInset className='h-svh min-h-0 max-h-svh overflow-hidden'>
         <header className='sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur'>
