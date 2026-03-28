@@ -3,7 +3,6 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { AIChatAgent, type OnChatMessageOptions } from '@cloudflare/ai-chat'
 import { DynamicWorkerExecutor } from '@cloudflare/codemode'
 import { createCodeTool } from '@cloudflare/codemode/ai'
-import puppeteer from '@cloudflare/puppeteer'
 import { getSandbox, type Sandbox } from '@cloudflare/sandbox'
 import { getAgentByName } from 'agents'
 import type { UIMessage } from 'ai'
@@ -93,7 +92,7 @@ interface BruhEnv {
   HOST?: string
   APP_ORIGIN?: string
   GITHUB_MCP_TOKEN?: string
-  BROWSER?: Fetcher
+
   LOADER?: WorkerLoader
   [key: string]: unknown
 }
@@ -121,6 +120,21 @@ interface McpServerConfig {
   authEnvVar?: string
   transport?: 'auto' | 'sse' | 'streamable-http'
   headers?: Record<string, string>
+}
+
+// --- Notification types (broadcast to clients, not chat messages) ---
+
+interface BruhNotification {
+  id: string
+  type: 'scheduled-task-complete' | 'scheduled-task-failed'
+  title: string
+  body: string
+  timestamp: string
+}
+
+interface BruhBroadcastEvent {
+  type: 'notification'
+  notification: BruhNotification
 }
 
 // --- System prompt ---
@@ -165,13 +179,6 @@ You have access to an isolated sandbox container with a full Linux environment. 
 ## MCP
 You can connect to external MCP servers for additional tools. Use mcp_servers to check what's connected.
 
-## Web browsing
-You can browse and extract content from websites using browse_web.
-- Use browse_web when you need up-to-date web info.
-- Prefer multi-step action chains in a single browse_web call for complex browsing.
-- Cite page titles and URLs in your response.
-- If extraction is noisy, use a focused CSS selector.
-
 ## Codemode
 For complex tasks that require many tool calls, prefer codemode.
 Codemode lets you write short JavaScript that orchestrates tools (loops, branching, retries) in one step.
@@ -212,10 +219,12 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
   }
 
   // Wait up to 10s for MCP servers to connect before handling chat messages
+  maxPersistedMessages = 500
   waitForMcpConnections = { timeout: 10_000 }
 
   async onStart(): Promise<void> {
     this.ensureSchema()
+    this.cleanUpIncompleteToolCalls()
 
     const appOrigin = this.env.APP_ORIGIN?.trim() || ''
     this.mcp.configureOAuthCallback({
@@ -225,6 +234,37 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
 
     await this.connectDefaultMcpServers()
     await this.connectConfiguredMcpServers()
+  }
+
+  /**
+   * Fix tool calls stuck in non-terminal states (input-streaming, input-available, etc.)
+   * from interrupted streams. Marks them as output-error so the client renders them
+   * correctly and the model doesn't choke on missing tool results.
+   */
+  private cleanUpIncompleteToolCalls(): void {
+    let cleaned = false
+    for (const msg of this.messages) {
+      if (msg.role !== 'assistant' || !msg.parts) continue
+      for (const part of msg.parts) {
+        if (
+          isToolUIPart(part) &&
+          part.state !== 'output-available' &&
+          part.state !== 'output-error' &&
+          part.state !== 'output-denied'
+        ) {
+          ;(part as { state: string }).state = 'output-error'
+          ;(part as { errorText?: string }).errorText =
+            'Tool call interrupted — stream was disconnected before completion.'
+          cleaned = true
+        }
+      }
+    }
+    if (cleaned) {
+      this.persistMessages(this.messages)
+      console.log(
+        '[BruhAgent] Cleaned up incomplete tool calls from previous session',
+      )
+    }
   }
 
   private ensureSchema(): void {
@@ -801,305 +841,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           const object = await env.MEMORY_BUCKET.get(key)
           if (!object) return `No summary found for thread ${threadId}`
           return await object.text()
-        },
-      }),
-
-      // --- Web browsing tools ---
-
-      browse_web: createTool<{
-        url?: string
-        selector?: string
-        maxChars?: number
-        actions?: Array<{
-          type: 'goto' | 'click' | 'type' | 'wait_for' | 'extract' | 'links'
-          url?: string
-          selector?: string
-          text?: string
-          submit?: boolean
-          ms?: number
-          maxChars?: number
-          limit?: number
-        }>
-      }>({
-        description:
-          'Browse websites in a single browser session. Supports action chains (goto/click/type/wait_for/extract/links) for multi-step navigation and extraction.',
-        parameters: jsonSchema<{
-          url?: string
-          selector?: string
-          maxChars?: number
-          actions?: Array<{
-            type: 'goto' | 'click' | 'type' | 'wait_for' | 'extract' | 'links'
-            url?: string
-            selector?: string
-            text?: string
-            submit?: boolean
-            ms?: number
-            maxChars?: number
-            limit?: number
-          }>
-        }>({
-          type: 'object',
-          properties: {
-            url: {
-              type: 'string',
-              description:
-                'Optional single-page mode URL. If actions are omitted, this URL is loaded and extracted.',
-            },
-            selector: {
-              type: 'string',
-              description:
-                'Optional extraction selector for single-page mode or extract actions.',
-            },
-            maxChars: {
-              type: 'number',
-              description: 'Default extraction max chars (500-20000, default 8000).',
-            },
-            actions: {
-              type: 'array',
-              description:
-                'Optional multi-step browsing actions to run in order within one browser session.',
-              items: {
-                type: 'object',
-                properties: {
-                  type: {
-                    type: 'string',
-                    enum: ['goto', 'click', 'type', 'wait_for', 'extract', 'links'],
-                  },
-                  url: { type: 'string' },
-                  selector: { type: 'string' },
-                  text: { type: 'string' },
-                  submit: { type: 'boolean' },
-                  ms: { type: 'number' },
-                  maxChars: { type: 'number' },
-                  limit: { type: 'number' },
-                },
-                required: ['type'],
-              },
-            },
-          },
-        }),
-        execute: async ({ url, selector, maxChars, actions }) => {
-          if (!env.BROWSER) {
-            throw new ToolError('Browser binding is not configured')
-          }
-
-          const defaultLimit = Math.min(Math.max(maxChars ?? 8000, 500), 20_000)
-
-          const normalizeUrl = (value: string) => {
-            let parsed: URL
-            try {
-              parsed = new URL(value)
-            } catch {
-              throw new ToolError(`invalid url: ${value}`)
-            }
-            if (!['http:', 'https:'].includes(parsed.protocol)) {
-              throw new ToolError('url must use http or https')
-            }
-            return parsed.toString()
-          }
-
-          const plannedActions =
-            actions && actions.length > 0
-              ? actions
-              : [
-                  {
-                    type: 'goto' as const,
-                    url,
-                  },
-                  {
-                    type: 'extract' as const,
-                    selector,
-                    maxChars: defaultLimit,
-                  },
-                ]
-
-          const browser = await puppeteer.launch(env.BROWSER)
-          try {
-            const page = await browser.newPage()
-            const steps: Array<Record<string, unknown>> = []
-
-            for (const action of plannedActions) {
-              switch (action.type) {
-                case 'goto': {
-                  const target = action.url?.trim()
-                  if (!target) throw new ToolError('goto requires url')
-                  const nextUrl = normalizeUrl(target)
-                  await page.goto(nextUrl, {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30_000,
-                  })
-                  steps.push({ type: 'goto', url: page.url() })
-                  break
-                }
-
-                case 'click': {
-                  const targetSelector = action.selector?.trim()
-                  if (!targetSelector)
-                    throw new ToolError('click requires selector')
-                  await page.waitForSelector(targetSelector, { timeout: 10_000 })
-                  await page.click(targetSelector)
-                  await page
-                    .waitForNavigation({
-                      waitUntil: 'domcontentloaded',
-                      timeout: 10_000,
-                    })
-                    .catch(() => undefined)
-                  steps.push({
-                    type: 'click',
-                    selector: targetSelector,
-                    url: page.url(),
-                  })
-                  break
-                }
-
-                case 'type': {
-                  const targetSelector = action.selector?.trim()
-                  if (!targetSelector) throw new ToolError('type requires selector')
-                  const text = action.text ?? ''
-                  await page.waitForSelector(targetSelector, { timeout: 10_000 })
-                  await page.click(targetSelector, { clickCount: 3 })
-                  await page.type(targetSelector, text)
-                  if (action.submit) {
-                    await page.keyboard.press('Enter')
-                    await page
-                      .waitForNavigation({
-                        waitUntil: 'domcontentloaded',
-                        timeout: 10_000,
-                      })
-                      .catch(() => undefined)
-                  }
-                  steps.push({
-                    type: 'type',
-                    selector: targetSelector,
-                    textLength: text.length,
-                    submitted: Boolean(action.submit),
-                    url: page.url(),
-                  })
-                  break
-                }
-
-                case 'wait_for': {
-                  if (action.selector?.trim()) {
-                    await page.waitForSelector(action.selector.trim(), {
-                      timeout: 10_000,
-                    })
-                    steps.push({
-                      type: 'wait_for',
-                      selector: action.selector.trim(),
-                    })
-                  } else {
-                    const ms = Math.min(Math.max(action.ms ?? 1000, 100), 30_000)
-                    await new Promise((resolve) => setTimeout(resolve, ms))
-                    steps.push({ type: 'wait_for', ms })
-                  }
-                  break
-                }
-
-                case 'links': {
-                  const targetSelector = action.selector?.trim()
-                  const maxLinks = Math.min(Math.max(action.limit ?? 10, 1), 100)
-                  const links = await page.evaluate(
-                    ({ scopeSelector, limit }) => {
-                      const root = scopeSelector
-                        ? document.querySelector(scopeSelector)
-                        : document
-                      if (!root) return [] as Array<{ text: string; url: string }>
-
-                      const seen = new Set<string>()
-                      const collected: Array<{ text: string; url: string }> = []
-                      const anchors = Array.from(root.querySelectorAll('a[href]'))
-
-                      for (const anchor of anchors) {
-                        const href = anchor.getAttribute('href') || ''
-                        let absolute = ''
-                        try {
-                          absolute = new URL(href, location.href).toString()
-                        } catch {
-                          continue
-                        }
-                        if (!absolute || seen.has(absolute)) continue
-                        seen.add(absolute)
-                        collected.push({
-                          text: (anchor.textContent || '').replace(/\s+/g, ' ').trim(),
-                          url: absolute,
-                        })
-                        if (collected.length >= limit) break
-                      }
-
-                      return collected
-                    },
-                    { scopeSelector: targetSelector, limit: maxLinks },
-                  )
-
-                  steps.push({
-                    type: 'links',
-                    selector: targetSelector || null,
-                    count: links.length,
-                    links,
-                    url: page.url(),
-                  })
-                  break
-                }
-
-                case 'extract': {
-                  const targetSelector = action.selector?.trim() || selector?.trim()
-                  const limit = Math.min(
-                    Math.max(action.maxChars ?? defaultLimit, 500),
-                    20_000,
-                  )
-
-                  const extracted = await page.evaluate(
-                    ({ scopeSelector }) => {
-                      const target = scopeSelector
-                        ? document.querySelector(scopeSelector)
-                        : document.body
-                      const text = (target?.textContent || '')
-                        .replace(/\s+/g, ' ')
-                        .trim()
-                      return {
-                        title: document.title || '',
-                        url: location.href,
-                        text,
-                      }
-                    },
-                    { scopeSelector: targetSelector },
-                  )
-
-                  const clipped =
-                    extracted.text.length > limit
-                      ? `${extracted.text.slice(0, limit)}…`
-                      : extracted.text
-
-                  steps.push({
-                    type: 'extract',
-                    selector: targetSelector || null,
-                    title: extracted.title || '(untitled)',
-                    url: extracted.url,
-                    textLength: extracted.text.length,
-                    text: clipped,
-                  })
-                  break
-                }
-
-                default: {
-                  throw new ToolError(`unsupported action type: ${String(action.type)}`)
-                }
-              }
-            }
-
-            return JSON.stringify(
-              {
-                ok: true,
-                finalUrl: page.url(),
-                stepCount: steps.length,
-                steps,
-              },
-              null,
-              2,
-            )
-          } finally {
-            await browser.close().catch(() => undefined)
-          }
         },
       }),
 
@@ -1690,55 +1431,65 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     console.log(`[BruhAgent] Executing scheduled task: "${prompt}"`)
 
     try {
-      // Run as an ephemeral agent — standalone prompt, not part of conversation history.
-      // The agent has tools (memory etc.) so it can look up context if needed.
       const model = this.getModel()
       const tools = this.getTools()
 
       const result = await generateText({
         model,
-        prompt: prompt,
-        system: `${this.getSystemPrompt()}\n\nYou are executing a scheduled task. Carry out the task and report the result concisely. The user will see your response in their chat transcript.`,
+        prompt,
+        system: [
+          this.getSystemPrompt(),
+          '',
+          'You are executing a scheduled task autonomously. Carry out the task using tools if needed.',
+          '',
+          'When you are done, format your final response as a short notification with two lines:',
+          'Line 1: A brief, natural title (no emoji, no "Scheduled task" prefix)',
+          'Line 2: The details or result',
+          '',
+          'Example:',
+          'Build passed',
+          'All 42 tests green on main branch.',
+        ].join('\n'),
         tools,
         stopWhen: stepCountIs(10),
       })
 
-      const responseText = result.text?.trim()
-      if (!responseText) {
-        console.log('[BruhAgent] Scheduled task produced no text output')
-        return
-      }
+      const responseText = result.text?.trim() || 'Task completed'
+      const newlineIndex = responseText.indexOf('\n')
+      const title =
+        newlineIndex > 0
+          ? responseText.slice(0, newlineIndex).trim()
+          : responseText
+      const body =
+        newlineIndex > 0 ? responseText.slice(newlineIndex + 1).trim() : ''
 
-      // Post only the result as an assistant message in the transcript
-      const assistantMessage = {
+      this.broadcastNotification({
         id: crypto.randomUUID(),
-        role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: `⏰ ${responseText}` }],
-        createdAt: new Date(),
-      }
-      this.messages.push(assistantMessage)
-      await this.saveMessages(this.messages)
+        type: 'scheduled-task-complete',
+        title,
+        body,
+        timestamp: new Date().toISOString(),
+      })
 
       console.log(
-        `[BruhAgent] Scheduled task completed: ${result.text?.length ?? 0} chars`,
+        `[BruhAgent] Scheduled task completed: ${responseText.length} chars`,
       )
     } catch (error) {
       console.error('[BruhAgent] Scheduled task failed:', error)
 
-      const errorMessage = {
+      this.broadcastNotification({
         id: crypto.randomUUID(),
-        role: 'assistant' as const,
-        parts: [
-          {
-            type: 'text' as const,
-            text: `⚠️ Scheduled task failed: ${error instanceof Error ? error.message : 'unknown error'}`,
-          },
-        ],
-        createdAt: new Date(),
-      }
-      this.messages.push(errorMessage)
-      await this.saveMessages(this.messages)
+        type: 'scheduled-task-failed',
+        title: `Couldn't complete: ${prompt.slice(0, 60)}`,
+        body: error instanceof Error ? error.message : 'unknown error',
+        timestamp: new Date().toISOString(),
+      })
     }
+  }
+
+  private broadcastNotification(notification: BruhNotification): void {
+    const event: BruhBroadcastEvent = { type: 'notification', notification }
+    this.broadcast(JSON.stringify(event))
   }
 
   // --- Custom request handling ---
@@ -1767,8 +1518,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         return this.handleDeleteThread()
       case 'POST /rename':
         return this.handleRenameThread(request)
-      case 'POST /refresh-context':
-        return this.handleRefreshContext()
       case 'GET /threads':
         return this.handleListThreads()
       // Legacy event system (remove once web app fully migrated)
@@ -1831,15 +1580,9 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       tools,
       stopWhen: stepCountIs(10),
       onFinish: async (event) => {
-        const assistantMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant' as const,
-          content: event.text || '',
-          parts: [{ type: 'text' as const, text: event.text || '' }],
-          createdAt: new Date(),
-        }
-        this.messages.push(assistantMessage)
-        await this.saveMessages(this.messages)
+        // Only write session summary — the base class handles message persistence
+        // via _reply(). Do NOT call saveMessages here as it triggers onChatMessage,
+        // creating a loop of duplicate responses.
         this.ctx.waitUntil(this.writeSessionSummary(event.text || ''))
       },
     })
@@ -2012,14 +1755,6 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     })
 
     return Response.json(this.toMetadata())
-  }
-
-  private async handleRefreshContext(): Promise<Response> {
-    await this.refreshContext('manual')
-    return Response.json({
-      ok: true,
-      refreshedAt: this.state.contextRefreshedAt ?? new Date().toISOString(),
-    })
   }
 
   private handleListThreads(): Response {

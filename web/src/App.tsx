@@ -30,11 +30,18 @@ import { MessageMarkdown } from '@/components/message-markdown'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { Toaster } from '@/components/ui/sonner'
 import { Textarea } from '@/components/ui/textarea'
+import { toast } from 'sonner'
 import { useSystemTheme } from '@/hooks/use-theme'
 import {
   createSession,
@@ -42,7 +49,7 @@ import {
   followUpSession,
   getMainSession,
   listSessions,
-  refreshSessionContext,
+
   renameSession,
   type SessionState,
   steerSession,
@@ -132,51 +139,37 @@ function getMessageCreatedAt(message: UIMessage): string | Date | undefined {
   return undefined
 }
 
-function estimateContextTokens(messages: UIMessage[]): number {
-  const chars = messages.reduce(
-    (sum, message) => sum + JSON.stringify(message).length,
-    0,
-  )
-  return Math.ceil(chars / 4)
-}
-
 // --- Chat view using useAgentChat ---
 
 function ChatView({
   sessionId,
   agent,
   mcpServerNames,
+  mcpServers,
 }: {
   sessionId: string
   agent: AgentConnection
   mcpServerNames: Map<string, string>
+  mcpServers: McpServerInfo[]
 }) {
   const clientTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
-  const { messages, sendMessage, stop, clearHistory, error, status } = useAgentChat({
+  const { messages, sendMessage, stop, error, status } = useAgentChat({
     agent,
     body: () => ({
       clientTimezone,
       clientNowIso: new Date().toISOString(),
     }),
+    // Throttle React state updates from the message stream to prevent
+    // "Maximum update depth exceeded" during rapid multi-tool call turns.
+    // The Chat internals and the agent broadcast both call setMessages
+    // via useSyncExternalStore, creating cascading synchronous re-renders.
+    experimental_throttle: 50,
   })
   const [input, setInput] = useState('')
   const [queueMode, setQueueMode] = useState<'steer' | 'follow-up'>('steer')
   const isLoading = status === 'streaming' || status === 'submitted'
-
-  const contextTokenEstimate = useMemo(
-    () => estimateContextTokens(messages),
-    [messages],
-  )
-  const contextBudget = sessionId === MAIN_SESSION_ID ? 16_000 : 24_000
-  const contextRatio = Math.min(contextTokenEstimate / contextBudget, 1)
-  const contextTone =
-    contextRatio >= 0.85
-      ? 'text-destructive'
-      : contextRatio >= 0.8
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-muted-foreground'
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageEndRef = useRef<HTMLDivElement | null>(null)
@@ -200,7 +193,6 @@ function ChatView({
     if (!text) return
 
     if (isLoading) {
-      // While streaming, use steer or follow-up
       try {
         if (queueMode === 'steer') {
           await steerSession(sessionId, text)
@@ -217,28 +209,6 @@ function ChatView({
     sendMessage({ role: 'user', parts: [{ type: 'text', text }] })
     setInput('')
   }, [input, isLoading, queueMode, sessionId, sendMessage])
-
-  const handleClearHistory = useCallback(() => {
-    const ok = window.confirm(
-      'Clear this chat history? This cannot be undone for this thread.',
-    )
-    if (!ok) return
-    clearHistory()
-  }, [clearHistory])
-
-  const handleRefreshContext = useCallback(async () => {
-    const ok = window.confirm(
-      'Refresh context for this thread? It will keep only the latest turns and checkpoint prior context.',
-    )
-    if (!ok) return
-
-    try {
-      await refreshSessionContext(sessionId)
-      window.location.reload()
-    } catch (e) {
-      console.error('Failed to refresh context:', e)
-    }
-  }, [sessionId])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -305,7 +275,15 @@ function ChatView({
         </div>
       </div>
 
-      <div className='sticky bottom-0 z-20 shrink-0 border-t bg-background/95 px-2 py-2 backdrop-blur'>
+      <div className={cn(
+        'sticky bottom-0 z-20 shrink-0 bg-background/95 px-2 py-2 backdrop-blur',
+        isLoading ? 'border-t-0' : 'border-t',
+      )}>
+        {isLoading ? (
+          <div className='absolute inset-x-0 top-0 h-px overflow-hidden'>
+            <div className='agent-turn-shimmer h-full w-full' />
+          </div>
+        ) : null}
         <div className='flex flex-col gap-2'>
           {error ? (
             <div className='border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'>
@@ -326,21 +304,14 @@ function ChatView({
               className='min-h-24 resize-none border-0 text-sm sm:text-[15px]'
             />
             <div className='flex items-center justify-between gap-2 border-t px-2 py-2'>
-              <div className='min-w-0 text-xs text-muted-foreground'>
-                <div className='flex flex-wrap items-center gap-2'>
-                  {contextRatio >= 0.85 ? (
-                    <span className={contextTone}>
-                      Context window {'>'}=85% — auto-refreshing context.
-                    </span>
-                  ) : contextRatio >= 0.8 ? (
-                    <span className={contextTone}>
-                      Context window {'>'}=80% — nearing limit.
-                    </span>
-                  ) : null}
-                </div>
+              <div className='min-w-0'>
+                {mcpServers.length > 0 ? (
+                  <McpStatusIndicator servers={mcpServers} />
+                ) : null}
+              </div>
+              <div className='flex items-center gap-2'>
                 {isLoading ? (
-                  <div className='mt-1 flex flex-wrap items-center gap-2'>
-                    <span>Bruh is responding…</span>
+                  <>
                     <div className='flex items-center gap-1'>
                       <Button
                         size='xs'
@@ -361,31 +332,16 @@ function ChatView({
                         Follow-up
                       </Button>
                     </div>
-                  </div>
+                    <Button variant='outline' onClick={() => stop()}>
+                      <StopCircleIcon data-icon='inline-start' />
+                      Stop
+                    </Button>
+                  </>
                 ) : null}
-              </div>
-              <div className='flex items-center gap-2'>
                 <Button
-                  variant='outline'
-                  onClick={handleRefreshContext}
-                  disabled={isLoading || messages.length === 0}
+                  onClick={handleSend}
+                  disabled={!input.trim()}
                 >
-                  Refresh context
-                </Button>
-                <Button
-                  variant='outline'
-                  onClick={handleClearHistory}
-                  disabled={isLoading || messages.length === 0}
-                >
-                  Clear history
-                </Button>
-                {isLoading ? (
-                  <Button variant='outline' onClick={() => stop()}>
-                    <StopCircleIcon data-icon='inline-start' />
-                    Stop
-                  </Button>
-                ) : null}
-                <Button onClick={handleSend} disabled={!input.trim()}>
                   <ArrowSquareOutIcon data-icon='inline-start' />
                   {isLoading
                     ? queueMode === 'steer'
@@ -399,6 +355,78 @@ function ChatView({
         </div>
       </div>
     </div>
+  )
+}
+
+// --- MCP status indicator ---
+
+const MCP_STATE_COLORS: Record<string, string> = {
+  ready: 'bg-emerald-500',
+  authenticating: 'bg-amber-500',
+  connecting: 'bg-amber-500',
+  connected: 'bg-amber-500',
+  discovering: 'bg-amber-500',
+  failed: 'bg-destructive',
+}
+
+function getAggregateColor(servers: McpServerInfo[]): string {
+  const hasError = servers.some((s) => s.state === 'failed')
+  if (hasError) return 'bg-destructive'
+  const allReady = servers.every((s) => s.state === 'ready')
+  if (allReady) return 'bg-emerald-500'
+  return 'bg-amber-500'
+}
+
+function McpStatusIndicator({ servers }: { servers: McpServerInfo[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        className='flex items-center gap-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+      >
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            getAggregateColor(servers),
+          )}
+        />
+        <span>MCP</span>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-64 p-2'>
+        <div className='flex flex-col gap-1'>
+          {servers.map((server) => {
+            const dotColor =
+              MCP_STATE_COLORS[server.state] ?? 'bg-muted-foreground/50'
+            const isFailed = server.state === 'failed'
+            return (
+              <div
+                key={server.name}
+                className='flex items-center gap-2 rounded px-2 py-1.5 text-xs'
+              >
+                <span
+                  className={cn('size-1.5 shrink-0 rounded-full', dotColor)}
+                />
+                <span className='min-w-0 truncate font-medium'>
+                  {server.name}
+                </span>
+                <span
+                  className={cn(
+                    'ml-auto shrink-0',
+                    isFailed
+                      ? 'text-destructive'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  {server.state}
+                </span>
+                {isFailed ? (
+                  <WarningCircleIcon className='size-3 shrink-0 text-destructive' />
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -697,10 +725,47 @@ function App() {
 
   // Agent connection — lives here so MCP state is available to sidebar
   const [mcpState, setMcpState] = useState<McpState>({ servers: {}, tools: [] })
+
+  const handleMcpUpdate = useCallback(
+    (state: unknown) => setMcpState(state as McpState),
+    [],
+  )
+
+  const handleAgentMessage = useCallback((event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data as string) as {
+        type?: string
+        notification?: {
+          type: string
+          title: string
+          body: string
+        }
+      }
+      if (data.type === 'notification' && data.notification) {
+        const { notification } = data
+        const isError = notification.type === 'scheduled-task-failed'
+        if (isError) {
+          toast.error(notification.title, {
+            description: notification.body,
+            duration: Infinity,
+          })
+        } else {
+          toast.success(notification.title, {
+            description: notification.body,
+            duration: Infinity,
+          })
+        }
+      }
+    } catch {
+      // Not a JSON message we handle
+    }
+  }, [])
+
   const agent = useAgent({
     agent: 'BruhAgent',
     name: sessionId ?? MAIN_SESSION_ID,
-    onMcpUpdate: (state) => setMcpState(state as McpState),
+    onMcpUpdate: handleMcpUpdate,
+    onMessage: handleAgentMessage,
   })
 
   const mcpServers = useMemo(
@@ -727,8 +792,8 @@ function App() {
         onCreateThread={handleCreateThread}
         isCreating={isCreating}
         sessions={sessions}
-        mcpServers={mcpServers}
-        mcpToolCount={mcpState.tools.length}
+
+
       />
       <SidebarInset className='h-svh min-h-0 max-h-svh overflow-hidden'>
         <header className='sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur'>
@@ -746,8 +811,10 @@ function App() {
           sessionId={sessionId}
           agent={agent}
           mcpServerNames={mcpServerNames}
+          mcpServers={mcpServers}
         />
       </SidebarInset>
+      <Toaster position='top-right' />
     </SidebarProvider>
   )
 }

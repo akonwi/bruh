@@ -17,10 +17,6 @@ export interface SessionEventEnvelope {
   payload: Record<string, unknown>
 }
 
-export interface SessionPromptRequest {
-  text: string
-}
-
 export interface SessionIndexEntry {
   sessionId: string
   createdAt: string
@@ -33,10 +29,11 @@ export interface Env {
   BRUH_AGENT: DurableObjectNamespace<BruhAgent>
   SANDBOX: DurableObjectNamespace<Sandbox>
   MEMORY_BUCKET: R2Bucket
-  BROWSER?: Fetcher
   LOADER?: WorkerLoader
   ASSETS?: Fetcher
   ANTHROPIC_API_KEY?: string
   OPENAI_API_KEY?: string
+  OPENAI_MODEL?: string
+  HOST?: string
   INTERNAL_API_SECRET?: string
 }

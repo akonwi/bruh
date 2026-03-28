@@ -2,9 +2,7 @@ import {
   ChatsTeardropIcon,
   ClockCounterClockwiseIcon,
   HouseIcon,
-  LightningIcon,
   PlusIcon,
-  WarningCircleIcon,
 } from '@phosphor-icons/react'
 
 import { useEffect, useRef, useState } from 'react'
@@ -33,7 +31,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar'
-import { cn } from '@/lib/utils'
+
 
 export type AppSection = 'main' | 'threads'
 
@@ -42,13 +40,6 @@ export interface SessionState {
   title?: string
   createdAt: string
   updatedAt: string
-}
-
-interface McpServerInfo {
-  name: string
-  state: string
-  server_url: string
-  error: string | null
 }
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
@@ -61,8 +52,6 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   onCreateThread: () => void
   isCreating: boolean
   sessions: SessionState[]
-  mcpServers: McpServerInfo[]
-  mcpToolCount: number
 }
 
 function SidebarHeaderContent({
@@ -91,37 +80,6 @@ function SidebarHeaderContent({
         </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
-  )
-}
-
-const stateColors: Record<string, string> = {
-  ready: 'bg-emerald-500',
-  authenticating: 'bg-amber-500',
-  connecting: 'bg-amber-500',
-  connected: 'bg-amber-500',
-  discovering: 'bg-amber-500',
-  failed: 'bg-destructive',
-}
-
-function McpServerItem({ server }: { server: McpServerInfo }) {
-  const dotColor = stateColors[server.state] ?? 'bg-muted-foreground/50'
-  const isFailed = server.state === 'failed'
-
-  return (
-    <div className='flex items-center gap-2 px-2 py-1'>
-      <span className={cn('size-1.5 shrink-0 rounded-full', dotColor)} />
-      <span
-        className={cn(
-          'min-w-0 truncate text-xs',
-          isFailed ? 'text-destructive' : 'text-sidebar-foreground/70',
-        )}
-      >
-        {server.name}
-      </span>
-      {isFailed ? (
-        <WarningCircleIcon className='size-3 shrink-0 text-destructive' />
-      ) : null}
-    </div>
   )
 }
 
@@ -159,12 +117,8 @@ export function AppSidebar({
   onCreateThread,
   isCreating,
   sessions,
-  mcpServers,
-  mcpToolCount,
   ...props
 }: AppSidebarProps) {
-  const { state } = useSidebar()
-  const collapsed = state === 'collapsed'
   const sortedSessions = sortSessions(sessions)
   const hasThreads = sessions.length > 0
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null)
@@ -348,26 +302,7 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
-        {!collapsed && mcpServers.length > 0 ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className='flex items-center gap-1.5'>
-              <LightningIcon className='size-3' />
-              <span>MCP Servers</span>
-              {mcpToolCount > 0 ? (
-                <span className='text-[10px] text-sidebar-foreground/50'>
-                  ({mcpToolCount} tools)
-                </span>
-              ) : null}
-            </SidebarGroupLabel>
-            <div className='flex flex-col gap-0.5'>
-              {mcpServers.map((server) => (
-                <McpServerItem key={server.name} server={server} />
-              ))}
-            </div>
-          </SidebarGroup>
-        ) : null}
-      </SidebarFooter>
+      <SidebarFooter />
 
       <SidebarRail />
     </Sidebar>

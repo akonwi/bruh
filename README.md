@@ -61,6 +61,8 @@ bun run dev
 
 Edge runs on `http://localhost:8790`, web on `http://localhost:5173`.
 
+If you are working on Sandbox behavior locally, see [Local Sandbox development](./docs/local-sandbox.md) for the current known-good baseline on Apple Silicon and the fallback troubleshooting steps we have validated.
+
 ### Environment variables (edge/.dev.vars)
 
 ```bash
@@ -107,6 +109,7 @@ bun run deploy:edge  # build + deploy
 
 ## Docs
 
+- [Local Sandbox development](./docs/local-sandbox.md) — known-good local baseline and Sandbox troubleshooting notes
 - [Memory conventions](./docs/memory.md) — how durable memory is organized
 - [Architecture decisions](./docs/decisions.md) — key design choices and rationale
 

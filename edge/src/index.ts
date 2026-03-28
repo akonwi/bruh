@@ -121,16 +121,6 @@ app.patch('/sessions/:sessionId', async (c) => {
   )
 })
 
-app.post('/sessions/:sessionId/refresh-context', async (c) => {
-  const sessionId = c.req.param('sessionId')
-  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId)
-  return stub.fetch(
-    new Request('https://agent/refresh-context', {
-      method: 'POST',
-    }),
-  )
-})
-
 async function unregisterThread(env: Env, sessionId: string): Promise<Response> {
   const registryStub = await getAgentByName(env.BRUH_AGENT, REGISTRY_AGENT_NAME)
   return registryStub.fetch(

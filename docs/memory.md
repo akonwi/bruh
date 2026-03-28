@@ -27,6 +27,7 @@ Use the two layers differently:
 - **Sandbox filesystem** is the thread-local execution/workspace layer.
 - Actual raw **Pi session files/history** can live in each thread's sandbox.
 - `sessions/<session-id>/summary.md` is the durable cross-thread handoff, not the full raw session history.
+- If Bruh later adds internal side-thread sandbox snapshots under a path like `sandboxes/<session-id>/...`, treat that as runtime-managed recovery data, not user-authored memory.
 
 ## Path conventions
 
