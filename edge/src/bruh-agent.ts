@@ -11,8 +11,8 @@ import {
   generateText,
   isToolUIPart,
   jsonSchema,
-  type StreamTextOnFinishCallback,
   pruneMessages,
+  type StreamTextOnFinishCallback,
   stepCountIs,
   streamText,
   type ToolSet,
@@ -33,14 +33,12 @@ function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
       const hasProblematicToolCall = msg.parts.some(
         (part) =>
           isToolUIPart(part) &&
-          (
-            // Non-terminal state (interrupted mid-stream)
-            (part.state !== 'output-available' &&
-              part.state !== 'output-error' &&
-              part.state !== 'output-denied') ||
+          // Non-terminal state (interrupted mid-stream)
+          ((part.state !== 'output-available' &&
+            part.state !== 'output-error' &&
+            part.state !== 'output-denied') ||
             // Terminal state but missing input (corrupted from interrupted stream)
-            part.input == null
-          ),
+            part.input == null),
       )
 
       if (!hasProblematicToolCall) return msg
@@ -69,12 +67,10 @@ function createTool<T>(config: {
 }) {
   // AI SDK v6 tool typing expects `inputSchema`; we provide `parameters`
   // in our local helper shape and bridge here without using `any`.
-  return tool(
-    {
-      ...config,
-      inputSchema: config.parameters,
-    } as unknown as Parameters<typeof tool>[0],
-  )
+  return tool({
+    ...config,
+    inputSchema: config.parameters,
+  } as unknown as Parameters<typeof tool>[0])
 }
 
 class ToolError extends Error {
@@ -603,7 +599,9 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
           let resolvedZone = chosenZone
           try {
             // Validate timezone
-            new Intl.DateTimeFormat('en-US', { timeZone: chosenZone }).format(now)
+            new Intl.DateTimeFormat('en-US', { timeZone: chosenZone }).format(
+              now,
+            )
           } catch {
             if (requestedZone) {
               throw new ToolError(`invalid timezone: ${requestedZone}`)
@@ -759,7 +757,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
                 if (Number.isFinite(numeric)) {
                   // Some scheduler runtimes return epoch seconds, others epoch ms.
                   // Treat values < 1e11 as seconds (good through year 5138).
-                  const epochMs = numeric < 100_000_000_000 ? numeric * 1000 : numeric
+                  const epochMs =
+                    numeric < 100_000_000_000 ? numeric * 1000 : numeric
                   const asDate = new Date(epochMs)
                   if (!Number.isNaN(asDate.getTime())) {
                     time = asDate.toISOString()
@@ -1722,7 +1721,10 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     this.messages = []
     this.ctx.waitUntil(
       this.saveMessages(this.messages).catch((error) => {
-        console.error('[BruhAgent] Failed to persist deleted thread messages:', error)
+        console.error(
+          '[BruhAgent] Failed to persist deleted thread messages:',
+          error,
+        )
       }),
     )
 
@@ -1865,5 +1867,4 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
       payload: JSON.parse(row.payload),
     }))
   }
-
 }

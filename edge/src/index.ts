@@ -121,7 +121,10 @@ app.patch('/sessions/:sessionId', async (c) => {
   )
 })
 
-async function unregisterThread(env: Env, sessionId: string): Promise<Response> {
+async function unregisterThread(
+  env: Env,
+  sessionId: string,
+): Promise<Response> {
   const registryStub = await getAgentByName(env.BRUH_AGENT, REGISTRY_AGENT_NAME)
   return registryStub.fetch(
     new Request('https://agent/unregister-thread', {
@@ -155,7 +158,10 @@ async function handleDeleteSession(c: {
           new Request('https://agent/delete-thread', { method: 'POST' }),
         )
       } catch (error) {
-        console.error('[DeleteSession] Background thread cleanup failed:', error)
+        console.error(
+          '[DeleteSession] Background thread cleanup failed:',
+          error,
+        )
       }
     })(),
   )

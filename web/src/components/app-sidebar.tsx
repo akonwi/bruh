@@ -32,7 +32,6 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 
-
 export type AppSection = 'main' | 'threads'
 
 export interface SessionState {
@@ -247,7 +246,9 @@ export function AppSidebar({
                               <Input
                                 ref={renameInputRef}
                                 value={editingTitle}
-                                onChange={(e) => setEditingTitle(e.target.value)}
+                                onChange={(e) =>
+                                  setEditingTitle(e.target.value)
+                                }
                                 onClick={(e) => e.stopPropagation()}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
@@ -263,7 +264,8 @@ export function AppSidebar({
                             ) : (
                               <>
                                 <span className='truncate'>
-                                  {session.title?.trim() || shortId(session.sessionId)}
+                                  {session.title?.trim() ||
+                                    shortId(session.sessionId)}
                                 </span>
                                 <span className='ml-auto flex shrink-0 items-center gap-1 text-[10px] text-sidebar-foreground/50'>
                                   <ClockCounterClockwiseIcon className='size-2.5' />
