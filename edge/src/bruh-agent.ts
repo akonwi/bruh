@@ -30,23 +30,29 @@ function sanitizeMessages(messages: UIMessage[]): UIMessage[] {
     .map((msg) => {
       if (msg.role !== 'assistant' || !msg.parts) return msg
 
-      const hasIncompleteToolCall = msg.parts.some(
+      const hasProblematicToolCall = msg.parts.some(
         (part) =>
           isToolUIPart(part) &&
-          part.state !== 'output-available' &&
-          part.state !== 'output-error' &&
-          part.state !== 'output-denied',
+          (
+            // Non-terminal state (interrupted mid-stream)
+            (part.state !== 'output-available' &&
+              part.state !== 'output-error' &&
+              part.state !== 'output-denied') ||
+            // Terminal state but missing input (corrupted from interrupted stream)
+            part.input == null
+          ),
       )
 
-      if (!hasIncompleteToolCall) return msg
+      if (!hasProblematicToolCall) return msg
 
-      // Strip incomplete tool invocations (calls without terminal output state)
+      // Strip tool parts that are incomplete or missing input/arguments
       const cleanParts = msg.parts.filter(
         (part) =>
           !isToolUIPart(part) ||
-          part.state === 'output-available' ||
-          part.state === 'output-error' ||
-          part.state === 'output-denied',
+          ((part.state === 'output-available' ||
+            part.state === 'output-error' ||
+            part.state === 'output-denied') &&
+            part.input != null),
       )
 
       return { ...msg, parts: cleanParts }
