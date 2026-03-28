@@ -137,7 +137,7 @@ export function ChatView({
               m.parts?.some((p) => p.type === 'text' && p.text),
           ) ? (
             <div className='flex justify-start'>
-              <div className='inline-flex items-center gap-2 border bg-background px-3 py-2 text-sm text-muted-foreground shadow-sm'>
+              <div className='inline-flex items-center gap-2 border bg-background px-3 py-2 text-sm text-muted-foreground'>
                 <SpinnerGapIcon className='size-4 animate-spin' />
                 <span>Thinking...</span>
               </div>
@@ -166,7 +166,7 @@ export function ChatView({
             </div>
           ) : null}
 
-          <div className='border bg-card shadow-sm'>
+          <div className='border bg-card'>
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

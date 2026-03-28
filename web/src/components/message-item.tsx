@@ -79,7 +79,7 @@ export function MessageItem({
         if (part.type === 'text' && part.text.trim()) {
           const bubbleClasses = isUser
             ? 'bg-primary text-primary-foreground'
-            : 'border bg-background text-card-foreground shadow-sm'
+            : 'border bg-background text-card-foreground'
 
           return (
             <div
@@ -175,7 +175,7 @@ function ToolPart({
     <div className='flex justify-start'>
       <details
         className={cn(
-          'group w-full max-w-[88%] border shadow-sm sm:max-w-[78%]',
+          'group w-full max-w-[88%] border sm:max-w-[78%]',
           panelTone,
         )}
       >
