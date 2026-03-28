@@ -107,11 +107,17 @@ function formatToolName(
   toolName: string,
   mcpServerNames?: Map<string, string>,
 ): string {
-  // MCP tools are namespaced as "{serverId}_{toolName}" — IDs vary in length
+  // MCP tools are namespaced as "tool_{serverId}_{toolName}" by the SDK
   if (mcpServerNames && mcpServerNames.size > 0) {
     for (const [id, name] of mcpServerNames) {
-      if (toolName.startsWith(`${id}_`)) {
-        const rest = toolName.slice(id.length + 1)
+      const prefixed = `tool_${id}_`
+      const bare = `${id}_`
+      if (toolName.startsWith(prefixed)) {
+        const rest = toolName.slice(prefixed.length)
+        return `${name}: ${rest.replaceAll('_', ' ')}`
+      }
+      if (toolName.startsWith(bare)) {
+        const rest = toolName.slice(bare.length)
         return `${name}: ${rest.replaceAll('_', ' ')}`
       }
     }
