@@ -11,7 +11,7 @@ import { McpStatusIndicator } from '@/components/mcp-status'
 import { MessageItem } from '@/components/message-item'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { followUpSession, steerSession } from '@/lib/api'
+import { deleteMessage, followUpSession, steerSession } from '@/lib/api'
 import type { AgentConnection, McpServerInfo } from '@/lib/types'
 import { MAIN_SESSION_ID } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -30,7 +30,7 @@ export function ChatView({
   const clientTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
-  const { messages, sendMessage, stop, error, status } = useAgentChat({
+  const { messages, setMessages, sendMessage, stop, error, status } = useAgentChat({
     agent,
     body: () => ({
       clientTimezone,
@@ -83,6 +83,18 @@ export function ChatView({
     setInput('')
   }, [input, isLoading, queueMode, sessionId, sendMessage])
 
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId))
+      try {
+        await deleteMessage(sessionId, messageId)
+      } catch (e) {
+        console.error('Failed to delete message:', e)
+      }
+    },
+    [sessionId, setMessages],
+  )
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       event.key !== 'Enter' ||
@@ -126,6 +138,7 @@ export function ChatView({
                 key={message.id}
                 message={message}
                 mcpServerNames={mcpServerNames}
+                onDelete={() => handleDeleteMessage(message.id)}
               />
             ))
           )}

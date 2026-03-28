@@ -213,6 +213,19 @@ app.post('/sessions/:sessionId/prompt', async (c) => {
   )
 })
 
+app.post('/sessions/:sessionId/messages/:messageId/delete', async (c) => {
+  const sessionId = c.req.param('sessionId')
+  const messageId = c.req.param('messageId')
+  const stub = await getAgentByName(c.env.BRUH_AGENT, sessionId)
+  return stub.fetch(
+    new Request('https://agent/delete-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId }),
+    }),
+  )
+})
+
 app.post('/sessions/:sessionId/steer', async (c) => {
   const sessionId = c.req.param('sessionId')
   const body = await c.req.text()

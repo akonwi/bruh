@@ -22,7 +22,7 @@ export function MessageMarkdown({
   return (
     <div
       className={cn(
-        'transcript-markdown prose prose-sm max-w-none break-words',
+        'transcript-markdown prose prose-sm max-w-none wrap-break-word',
         tone === 'user'
           ? 'transcript-markdown-user'
           : tone === 'system'

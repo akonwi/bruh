@@ -13,6 +13,12 @@ import {
   type UIMessage,
 } from 'ai'
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { MessageMarkdown } from '@/components/message-markdown'
 import { cn } from '@/lib/utils'
 
@@ -50,49 +56,61 @@ function truncateInline(value: string, maxLength = 72): string {
 export function MessageItem({
   message,
   mcpServerNames,
+  onDelete,
 }: {
   message: UIMessage
   mcpServerNames: Map<string, string>
+  onDelete: () => void
 }) {
   const isUser = message.role === 'user'
 
   return (
-    <>
-      {message.parts?.map((part: UIMessage['parts'][number], i: number) => {
-        if (part.type === 'text' && part.text.trim()) {
-          const bubbleClasses = isUser
-            ? 'bg-primary text-primary-foreground'
-            : 'border bg-background text-card-foreground'
+    <ContextMenu>
+      <ContextMenuTrigger>
+        {message.parts?.map((part: UIMessage['parts'][number], i: number) => {
+          if (part.type === 'text' && part.text.trim()) {
+            const bubbleClasses = isUser
+              ? 'bg-primary text-primary-foreground'
+              : 'border bg-background text-card-foreground'
 
-          return (
-            <div
-              key={i}
-              className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
-            >
+            return (
               <div
+                key={i}
                 className={cn(
-                  'max-w-[88%] px-3 py-2 sm:max-w-[78%]',
-                  bubbleClasses,
+                  'flex',
+                  isUser ? 'justify-end' : 'justify-start',
                 )}
               >
-                <MessageMarkdown
-                  content={part.text}
-                  tone={isUser ? 'user' : 'assistant'}
-                />
+                <div
+                  className={cn(
+                    'max-w-[88%] px-3 py-2 sm:max-w-[78%]',
+                    bubbleClasses,
+                  )}
+                >
+                  <MessageMarkdown
+                    content={part.text}
+                    tone={isUser ? 'user' : 'assistant'}
+                  />
+                </div>
               </div>
-            </div>
-          )
-        }
+            )
+          }
 
-        if (isToolUIPart(part)) {
-          return (
-            <ToolPart key={i} part={part} mcpServerNames={mcpServerNames} />
-          )
-        }
+          if (isToolUIPart(part)) {
+            return (
+              <ToolPart key={i} part={part} mcpServerNames={mcpServerNames} />
+            )
+          }
 
-        return null
-      })}
-    </>
+          return null
+        })}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem variant='destructive' onClick={onDelete}>
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

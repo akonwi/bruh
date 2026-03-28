@@ -70,7 +70,6 @@ function SidebarHeaderContent({
           </div>
           {!collapsed ? (
             <div className='grid flex-1 text-left text-sm leading-tight'>
-              <span className='truncate font-semibold'>Main</span>
               <span className='truncate text-xs text-sidebar-foreground/70'>
                 Bruh
               </span>

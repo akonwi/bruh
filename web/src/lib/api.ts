@@ -57,6 +57,18 @@ export async function renameSession(
   return response.json()
 }
 
+export async function deleteMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/sessions/${sessionId}/messages/${messageId}/delete`),
+    { method: 'POST' },
+  )
+  if (!response.ok)
+    throw new Error(`Failed to delete message: ${response.status}`)
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   const response = await fetch(apiUrl(`/sessions/${sessionId}/delete`), {
     method: 'POST',

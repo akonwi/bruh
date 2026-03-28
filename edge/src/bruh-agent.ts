@@ -1523,6 +1523,8 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
         return this.handleDeleteThread()
       case 'POST /rename':
         return this.handleRenameThread(request)
+      case 'POST /delete-message':
+        return this.handleDeleteMessage(request)
       case 'GET /threads':
         return this.handleListThreads()
       // Legacy event system (remove once web app fully migrated)
@@ -1738,6 +1740,21 @@ export class BruhAgent extends AIChatAgent<BruhEnv, BruhState> {
     })
 
     return Response.json({ ok: true, sessionId })
+  }
+
+  private async handleDeleteMessage(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      messageId?: string
+    }
+    const messageId = body.messageId?.trim()
+    if (!messageId) {
+      return Response.json({ error: 'messageId is required' }, { status: 400 })
+    }
+
+    this.sql`DELETE FROM cf_ai_chat_agent_messages WHERE id = ${messageId}`
+    this.messages = this.messages.filter((m) => m.id !== messageId)
+
+    return Response.json({ ok: true, messageId })
   }
 
   private async handleRenameThread(request: Request): Promise<Response> {
