@@ -18,16 +18,6 @@ import { cn } from '@/lib/utils'
 
 // --- Formatting helpers ---
 
-function formatMessageTime(timestamp: string | Date | undefined): string {
-  if (!timestamp) return ''
-  const value = new Date(timestamp)
-  if (Number.isNaN(value.getTime())) return ''
-  return new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(value)
-}
-
 export function formatToolName(
   toolName: string,
   mcpServerNames?: Map<string, string>,
@@ -53,13 +43,6 @@ export function formatToolName(
 function truncateInline(value: string, maxLength = 72): string {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength).trimEnd()}…`
-}
-
-function getMessageCreatedAt(message: UIMessage): string | Date | undefined {
-  if (!('createdAt' in message)) return undefined
-  const value = (message as UIMessage & { createdAt?: unknown }).createdAt
-  if (typeof value === 'string' || value instanceof Date) return value
-  return undefined
 }
 
 // --- Components ---
@@ -96,16 +79,6 @@ export function MessageItem({
                   content={part.text}
                   tone={isUser ? 'user' : 'assistant'}
                 />
-                <p
-                  className={cn(
-                    'mt-1 text-[11px]',
-                    isUser
-                      ? 'text-primary-foreground/70'
-                      : 'text-muted-foreground',
-                  )}
-                >
-                  {formatMessageTime(getMessageCreatedAt(message))}
-                </p>
               </div>
             </div>
           )
